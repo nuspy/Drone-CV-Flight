@@ -59,6 +59,15 @@ class Localizer:
         self.vo = VisualOdometry(self.width, self.height, self.fov, self.tilt)
         self.fuser = EkfFuser(cfg.localization)
         self.target_err_m = cfg.active_loop.thresholds.p95_pos_err_m
+        # The filter covariance collapses when many cues agree — but their
+        # errors are CORRELATED (same model bias), so the true error floor is
+        # the model's measured generalization error, not the filter's P.
+        metrics = bundle.manifest.get("metrics") or {}
+        probe_p95 = min(
+            (metrics.get("apr", {}) or {}).get("pos_err_h_p95_m", float("inf")),
+            (metrics.get("retrieval", {}) or {}).get("fix_err_h_p95_m", float("inf")),
+        )
+        self.sigma_floor_m = max(3.0, 0.35 * probe_p95) if np.isfinite(probe_p95) else 3.0
         self._prev_gray: np.ndarray | None = None
         self._prev_heading: float | None = None
         self._prev_time: float | None = None
@@ -159,7 +168,11 @@ class Localizer:
 
         # ---- output ----
         health = float(np.mean(self._recent_absolute)) if self._recent_absolute else 0.0
-        confidence = self.fuser.confidence(self.target_err_m, cue_health=0.3 + 0.7 * health)
+        sigma_h = max(self.fuser.pos_sigma_h, self.sigma_floor_m)
+        p_within = 1.0 - math.exp(-(self.target_err_m**2) / (2.0 * sigma_h**2))
+        confidence = float(np.clip(p_within * (0.3 + 0.7 * health), 0.0, 1.0))
+        if not self.fuser.initialized:
+            confidence = 0.0
         pos = self.fuser.pos
         lat, lon, alt = self.anchor.enu_to_geodetic(pos)
         vel = self.fuser.vel

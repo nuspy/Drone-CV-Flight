@@ -68,6 +68,24 @@ dronecv report open --env headless_ci
 Individual stages: `dronecv sim | capture | train | evaluate | localize |
 test-flight | protocol verify`.
 
+## Quick test with a photo (and the Android app)
+
+Because localization is image-based, a single photo of a trained environment
+(e.g. an aerial picture) is enough for a quick test — no flight needed:
+
+```bash
+dronecv localize-photo path/to/aerial.jpg --env <env>     # coordinates + maps link
+dronecv serve --env <env> --host 0.0.0.0 --port 8000      # HTTP inference server
+dronecv export --env <env>                                # ONNX bundle for on-device use
+```
+
+The **Android app** (`android/`) takes or picks a photo and shows the
+estimated coordinates, altitude, confidence and the position on Google Maps.
+It works in two modes: **server** (POSTs the photo to `dronecv serve`) or
+**on-device** (runs the exported ONNX bundle with ONNX Runtime + NNAPI, using
+the phone's NPU where available; the model is downloaded from the server with
+one tap). See `android/README.md`.
+
 ## Unity 6.5
 
 The `unity/com.dronecv.flight` package makes any Unity scene speak the same

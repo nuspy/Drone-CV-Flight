@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies (CPU torch)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev]"
+          pip install -e ".[dev,server,export]"
 
       - name: Lint
         run: ruff check src tests

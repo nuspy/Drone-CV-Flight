@@ -116,6 +116,54 @@ def run_all(
     raise SystemExit(run_all_pipeline(env, budget, episodes, seed, bundle))
 
 
+@app.command("localize-photo")
+def localize_photo(
+    image: str = typer.Argument(..., help="Path to a photo (jpeg/png) of the trained environment"),
+    env: str = typer.Option(..., "--env"),
+    bundle: str = typer.Option(None, "--model-bundle"),
+) -> None:
+    """Localize a single photo (e.g. an aerial picture) against a trained model."""
+    from dronecv.commands.photo_cmd import run_localize_photo
+
+    run_localize_photo(env, image, bundle)
+
+
+@app.command()
+def serve(
+    env: str = typer.Option(..., "--env"),
+    bundle: str = typer.Option(None, "--model-bundle"),
+    host: str = typer.Option("0.0.0.0", "--host"),
+    port: int = typer.Option(8000, "--port"),
+) -> None:
+    """Start the HTTP inference server (photo -> coordinates; used by the Android app)."""
+    from dronecv.config import load_config
+    from dronecv.server.app import run_server
+
+    cfg = load_config(env)
+    from pathlib import Path
+
+    bundle_dir = Path(bundle) if bundle else cfg.bundle_dir
+    run_server(bundle_dir, host, port, cfg.artifacts_dir / "mobile_bundle")
+
+
+@app.command()
+def export(
+    env: str = typer.Option(..., "--env"),
+    bundle: str = typer.Option(None, "--model-bundle"),
+) -> None:
+    """Export the trained model as an on-device (ONNX) bundle for the Android app."""
+    from pathlib import Path
+
+    from dronecv.config import load_config
+    from dronecv.export.mobile import export_mobile_bundle
+    from dronecv.training.bundle import ModelBundle
+
+    cfg = load_config(env)
+    mb = ModelBundle.load(Path(bundle) if bundle else cfg.bundle_dir)
+    out = export_mobile_bundle(mb, cfg.artifacts_dir / "mobile_bundle")
+    console.print(f"[green]mobile bundle exported to {out}[/green]")
+
+
 protocol_app = typer.Typer(help="Protocol utilities")
 app.add_typer(protocol_app, name="protocol")
 

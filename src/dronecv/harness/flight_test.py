@@ -100,6 +100,7 @@ class TruthTracker:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
+        await self.client.close()
 
 
 class FlightTestHarness:
@@ -128,11 +129,22 @@ class FlightTestHarness:
         return ok
 
     async def _connect(self) -> tuple[SimClient, GeoAnchor, LocalizationService, TruthTracker]:
+        """Three separate connections on purpose:
+        - `harness`: control (reset/teleport/commands/target captures). No
+          background reader, so request/response calls are safe.
+        - a dedicated truth connection consumed ONLY by the TruthTracker.
+          Sharing one connection here once deadlocked the whole test: the
+          tracker's background recv interleaved with a capture() recv and
+          corrupted the framing.
+        - the localizer service's own sensor connection (blind role).
+        """
         harness = await SimClient.connect(self.cfg.sim.host, self.cfg.sim.port, role="harness")
         anchor = GeoAnchor.resolve(self.cfg.env.anchor, harness.geo_meta)
         service = LocalizationService(self.cfg, self.bundle)
         await service.connect()
-        tracker = TruthTracker(harness, anchor)
+        truth_client = await SimClient.connect(self.cfg.sim.host, self.cfg.sim.port, role="harness")
+        await truth_client.subscribe(["truth"])
+        tracker = TruthTracker(truth_client, anchor)
         return harness, anchor, service, tracker
 
     # -------------------------------------------------------- accuracy phase
@@ -142,7 +154,6 @@ class FlightTestHarness:
         harness, anchor, service, tracker = await self._connect()
         try:
             done = await harness.reset(seed=self.cfg.env.seed, utc=self.cfg.env.start_utc)
-            await harness.subscribe(["truth"])
             tracker.start()
             start = np.array(done.pos_sim)
 
@@ -245,7 +256,6 @@ class FlightTestHarness:
         harness, anchor, service, tracker = await self._connect()
         try:
             done = await harness.reset(seed=self.cfg.env.seed * 100 + ep, utc=self.cfg.env.start_utc)
-            await harness.subscribe(["truth"])
             tracker.start()
             start_sim = np.array(done.pos_sim)
 
