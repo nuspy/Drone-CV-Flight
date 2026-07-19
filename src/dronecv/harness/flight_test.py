@@ -59,11 +59,15 @@ class TruthTracker:
     def truth_enu(self, frame_id: int) -> _Truth | None:
         return self.by_frame.get(frame_id)
 
-    async def wait_for(self, frame_id: int, timeout: float = 2.0) -> _Truth | None:
+    async def wait_for(self, frame_id: int, timeout: float = 0.5) -> _Truth | None:
         deadline = asyncio.get_event_loop().time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             if frame_id in self.by_frame:
                 return self.by_frame[frame_id]
+            # Truth for a frame OLDER than what we already have will never
+            # arrive — bail out instead of burning the whole timeout.
+            if self.latest_id > frame_id + 50:
+                return None
             await asyncio.sleep(0.005)
         return None
 
@@ -87,8 +91,8 @@ class TruthTracker:
                     )
                     self.collided_ever |= msg.collided
                     self.latest_id = msg.frame_id
-                    if len(self.by_frame) > 300:
-                        for k in sorted(self.by_frame)[:-200]:
+                    if len(self.by_frame) > 4000:
+                        for k in sorted(self.by_frame)[:-3000]:
                             del self.by_frame[k]
         except (asyncio.CancelledError, ConnectionError):
             pass

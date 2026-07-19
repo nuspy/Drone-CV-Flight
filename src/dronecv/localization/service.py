@@ -34,13 +34,46 @@ class LocalizationService:
         log.info(f"localizing against {self.client.ack.sim_kind} sim '{self.client.ack.env_id}'")
 
     async def estimates(self) -> AsyncIterator[tuple[int, Estimate]]:
-        """Yield (frame_id, estimate) forever."""
+        """Yield (frame_id, estimate) forever.
+
+        Frames that arrive while a step is still being processed are DROPPED
+        in favor of the newest one — exactly what a real camera pipeline does
+        when inference is slower than the frame rate. Without this, a
+        faster-than-realtime sim runs ahead and the estimates (and any
+        control decisions built on them) refer to an ever-older state.
+        """
         assert self.client and self.localizer
-        async for msg, blobs in self.client.stream():
-            if not isinstance(msg, m.SensorFrame):
-                continue
-            est = self.localizer.step(blobs["rgb"], msg.lidar_range_m, msg.utc, msg.sim_time)
-            yield msg.frame_id, est
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def pump() -> None:
+            async for item in self.client.stream():
+                queue.put_nowait(item)
+
+        pump_task = asyncio.create_task(pump())
+        dropped = 0
+        try:
+            while True:
+                msg, blobs = await queue.get()
+                # Drain the backlog, keeping only the newest sensor frame.
+                while not queue.empty():
+                    nxt_msg, nxt_blobs = queue.get_nowait()
+                    if isinstance(nxt_msg, m.SensorFrame):
+                        if isinstance(msg, m.SensorFrame):
+                            dropped += 1
+                        msg, blobs = nxt_msg, nxt_blobs
+                if not isinstance(msg, m.SensorFrame):
+                    continue
+                est = self.localizer.step(blobs["rgb"], msg.lidar_range_m, msg.utc, msg.sim_time)
+                if dropped and dropped % 200 == 0:
+                    log.info(f"localizer lagging: {dropped} stale frames dropped so far")
+                yield msg.frame_id, est
+                if pump_task.done() and queue.empty():
+                    pump_task.result()  # surface connection errors
+                    return
+        finally:
+            pump_task.cancel()
 
     async def run(self, on_estimate: Callable[[int, Estimate], None]) -> None:
         async for frame_id, est in self.estimates():

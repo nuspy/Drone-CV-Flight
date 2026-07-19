@@ -79,6 +79,9 @@ class HeadlessSimServer:
     # ----------------------------------------------------------------- clients
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        from dronecv.protocol.transport import tune_socket
+
+        tune_socket(writer)
         conn = Connection(reader, writer)
         client = _Client(conn)
         try:

@@ -60,6 +60,29 @@ class Connection:
             pass
 
 
+# Keep kernel socket buffers small: the faster-than-realtime sim must not run
+# hundreds of frames ahead of a slow consumer. With ~32 KiB each way only a
+# handful of jpeg frames fit in flight, so TCP backpressure paces the sim to
+# within a few ticks of its slowest sensor subscriber.
+SOCKET_BUF_BYTES = 32768
+
+
+def tune_socket(writer: asyncio.StreamWriter) -> None:
+    import socket as socket_mod
+
+    sock = writer.get_extra_info("socket")
+    if sock is not None:
+        try:
+            sock.setsockopt(socket_mod.SOL_SOCKET, socket_mod.SO_SNDBUF, SOCKET_BUF_BYTES)
+            sock.setsockopt(socket_mod.SOL_SOCKET, socket_mod.SO_RCVBUF, SOCKET_BUF_BYTES)
+            sock.setsockopt(socket_mod.IPPROTO_TCP, socket_mod.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
+
 async def connect(host: str, port: int, timeout: float = 10.0) -> Connection:
-    reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port, limit=1 << 22), timeout
+    )
+    tune_socket(writer)
     return Connection(reader, writer)
