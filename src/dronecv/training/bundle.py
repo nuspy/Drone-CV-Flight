@@ -21,6 +21,7 @@ from typing import Any
 import torch
 
 from dronecv.geo.anchor import GeoAnchor
+from dronecv.localization.terrain import TerrainPrior
 from dronecv.models.pose_net import PoseNet
 from dronecv.models.retrieval import EmbeddingNet, LandmarkDB
 
@@ -33,6 +34,7 @@ class ModelBundle:
     pose_net: PoseNet
     landmark_db: LandmarkDB
     manifest: dict[str, Any]
+    terrain: TerrainPrior
 
     @property
     def anchor(self) -> GeoAnchor:
@@ -48,6 +50,7 @@ class ModelBundle:
         torch.save(self.embed_net.state_dict(), out_dir / "embed.pt")
         torch.save(self.pose_net.state_dict(), out_dir / "posenet.pt")
         self.landmark_db.save(out_dir / "landmark_db.npz")
+        self.terrain.save(out_dir / "terrain_prior.npz")
         (out_dir / "manifest.json").write_text(json.dumps(self.manifest, indent=2))
 
     @classmethod
@@ -60,6 +63,7 @@ class ModelBundle:
         pose = PoseNet(hp["backbone_width"], hp["pos_scale_m"])
         pose.load_state_dict(torch.load(bundle_dir / "posenet.pt", weights_only=True))
         db = LandmarkDB.load(bundle_dir / "landmark_db.npz")
+        terrain = TerrainPrior.load(bundle_dir / "terrain_prior.npz")
         embed.eval()
         pose.eval()
-        return cls(embed, pose, db, manifest)
+        return cls(embed, pose, db, manifest, terrain)

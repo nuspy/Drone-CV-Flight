@@ -123,6 +123,13 @@ def train_models(
     headings = ds.headings_deg()[train_idx]
     db = LandmarkDB(embeddings, positions, headings)
 
+    # Terrain elevation prior from the capture ground probes (all captures,
+    # not only train: ground truth terrain is not a learned quantity).
+    from dronecv.localization.terrain import TerrainPrior
+
+    ground_up = np.array([r["ground_y_sim"] for r in ds.records], dtype=float)
+    terrain = TerrainPrior.from_records(ds.positions_enu(), ground_up, t.val_cell_m)
+
     anchor = GeoAnchor.from_dict(ds.info["anchor"])
     manifest = {
         "bundle_version": BUNDLE_VERSION,
@@ -139,7 +146,7 @@ def train_models(
         "calibration": {"apr_sigma_scale": 1.0},
         "metrics": {},
     }
-    bundle = ModelBundle(embed_net.cpu(), pose_net.cpu(), db, manifest)
+    bundle = ModelBundle(embed_net.cpu(), pose_net.cpu(), db, manifest, terrain)
     return bundle, {"train_idx": train_idx, "val_idx": val_idx, "last_stats": last_stats}
 
 
