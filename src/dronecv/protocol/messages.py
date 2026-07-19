@@ -14,7 +14,7 @@ localizer never sees the answer.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -170,25 +170,7 @@ class Pong(Header):
 
 
 AnyMessage = Annotated[
-    Union[
-        Hello,
-        HelloAck,
-        EnvInfoRequest,
-        EnvInfo,
-        Subscribe,
-        SubscribeAck,
-        CaptureRequest,
-        CaptureResult,
-        SensorFrame,
-        Command,
-        TruthState,
-        Reset,
-        ResetDone,
-        Teleport,
-        ErrorMsg,
-        Ping,
-        Pong,
-    ],
+    Hello | HelloAck | EnvInfoRequest | EnvInfo | Subscribe | SubscribeAck | CaptureRequest | CaptureResult | SensorFrame | Command | TruthState | Reset | ResetDone | Teleport | ErrorMsg | Ping | Pong,
     Field(discriminator="type"),
 ]
 

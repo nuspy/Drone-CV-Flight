@@ -113,8 +113,10 @@ def test_jpeg_blob_lossy_but_close():
 def test_unknown_message_type_rejected():
     import struct
 
+    from pydantic import ValidationError
+
     header = json.dumps({"type": "evil", "version": "1.0", "msg_id": 0, "sim_time": 0, "blobs": []}).encode()
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         decode_message(struct.pack(">I", len(header)) + header)
 
 
@@ -125,7 +127,7 @@ def test_golden_fixtures_stable():
     if not FIXTURES.exists():
         pytest.skip("fixtures not generated yet")
     samples = _all_sample_messages()
-    for name, (msg, blobs) in samples.items():
+    for name, (msg, _blobs) in samples.items():
         path = FIXTURES / f"{name}.bin"
         assert path.exists(), f"missing golden fixture {name}.bin — regenerate"
         golden = path.read_bytes()

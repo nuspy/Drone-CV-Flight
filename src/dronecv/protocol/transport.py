@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 
 import numpy as np
 
 from dronecv.protocol.framing import MAX_BLOB_LEN, MAX_HEADER_LEN, ProtocolError, decode_blob, encode_message
 from dronecv.protocol.messages import AnyMessage, parse_message
-
-import json
 
 
 class Connection:

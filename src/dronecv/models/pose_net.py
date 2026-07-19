@@ -55,7 +55,7 @@ class PoseNet(nn.Module):
         loss = loss_pos + 0.5 * loss_head
         stats = {
             "loss": float(loss.detach()),
-            "pos_rmse_m": float((pos_err.detach().mean().sqrt() * self.pos_scale_m)),
+            "pos_rmse_m": float(pos_err.detach().mean().sqrt() * self.pos_scale_m),
         }
         return loss, stats
 

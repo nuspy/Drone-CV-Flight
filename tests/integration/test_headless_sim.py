@@ -1,6 +1,7 @@
 """Integration tests: full protocol conversation against a live headless sim."""
 
 import asyncio
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,8 +11,6 @@ from dronecv.protocol import messages as m
 from dronecv.protocol.framing import ProtocolError
 from dronecv.protocol.sim_client import SimClient
 from dronecv.sim.headless.server import HeadlessSimServer
-
-from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
 

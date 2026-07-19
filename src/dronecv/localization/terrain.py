@@ -21,7 +21,7 @@ class TerrainPrior:
         self.global_median = float(np.median(list(cells.values()))) if cells else 0.0
 
     @classmethod
-    def from_records(cls, pos_enu: np.ndarray, ground_up: np.ndarray, cell_m: float) -> "TerrainPrior":
+    def from_records(cls, pos_enu: np.ndarray, ground_up: np.ndarray, cell_m: float) -> TerrainPrior:
         buckets: dict[tuple[int, int], list[float]] = {}
         for (e, n, _u), g in zip(pos_enu, ground_up, strict=True):
             key = (int(np.floor(e / cell_m)), int(np.floor(n / cell_m)))
@@ -55,7 +55,7 @@ class TerrainPrior:
         np.savez_compressed(path, cell_m=self.cell_m, keys=keys, vals=vals)
 
     @classmethod
-    def load(cls, path: Path) -> "TerrainPrior":
+    def load(cls, path: Path) -> TerrainPrior:
         data = np.load(path)
         cells = {
             (int(k[0]), int(k[1])): float(v)

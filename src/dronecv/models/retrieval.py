@@ -111,7 +111,7 @@ class LandmarkDB:
         )
 
     @classmethod
-    def load(cls, path: Path) -> "LandmarkDB":
+    def load(cls, path: Path) -> LandmarkDB:
         data = np.load(path)
         return cls(data["embeddings"], data["pos_enu"], data["heading_deg"])
 

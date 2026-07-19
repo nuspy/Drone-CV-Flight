@@ -21,7 +21,7 @@ class SimClient:
         self.ack = ack
 
     @classmethod
-    async def connect(cls, host: str, port: int, role: m.Role, timeout: float = 10.0) -> "SimClient":
+    async def connect(cls, host: str, port: int, role: m.Role, timeout: float = 10.0) -> SimClient:
         conn = await connect(host, port, timeout)
         await conn.send(m.Hello(role=role))
         msg, _ = await conn.recv()

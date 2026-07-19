@@ -41,7 +41,9 @@ def test_unknown_env_lists_available():
 
 
 def test_unknown_key_rejected():
-    with pytest.raises(Exception):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         load_config("headless_ci", overrides={"guidance": {"standof_m": 5}}, root=ROOT)
 
 

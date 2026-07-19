@@ -6,7 +6,6 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
-import cv2
 import numpy as np
 
 from dronecv.geo import celestial

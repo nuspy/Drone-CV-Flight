@@ -54,7 +54,7 @@ class ModelBundle:
         (out_dir / "manifest.json").write_text(json.dumps(self.manifest, indent=2))
 
     @classmethod
-    def load(cls, bundle_dir: Path) -> "ModelBundle":
+    def load(cls, bundle_dir: Path) -> ModelBundle:
         bundle_dir = Path(bundle_dir)
         manifest = json.loads((bundle_dir / "manifest.json").read_text())
         hp = manifest["hyperparams"]
