@@ -1,0 +1,41 @@
+# Tiny environment sized for CI: small world, low resolution, small budget.
+env:
+  name: headless_ci
+  kind: headless
+  seed: 0
+  anchor:
+    lat0: 45.4642
+    lon0: 9.1900
+    alt0: 120.0
+    true_north_offset_deg: 0.0
+
+sim:
+  image_width: 64
+  image_height: 64
+
+world:
+  size_m: 500.0
+  height_scale_m: 40.0
+  n_landmarks: 12
+  grid: 96
+
+capture:
+  altitudes_agl_m: [35.0, 60.0]
+  grid_spacing_m: 60.0
+
+training:
+  epochs_per_round: 8
+  backbone_width: 16
+
+active_loop:
+  budget_captures: 800
+  max_rounds: 3
+  probe_captures: 60
+  thresholds:
+    p95_pos_err_m: 15.0
+    p95_alt_err_m: 8.0
+    max_ece: 0.25
+
+harness:
+  episodes: 3
+  time_cap_s: 150.0

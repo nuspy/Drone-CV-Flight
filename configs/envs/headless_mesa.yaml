@@ -1,0 +1,20 @@
+# Default local headless environment: 1 km procedural mesa world.
+env:
+  name: headless_mesa
+  kind: headless
+  seed: 7
+  anchor:
+    lat0: 45.4642
+    lon0: 9.1900
+    alt0: 120.0
+    true_north_offset_deg: 0.0
+
+sim:
+  image_width: 128
+  image_height: 128
+
+world:
+  size_m: 1000.0
+  height_scale_m: 70.0
+  n_landmarks: 30
+  grid: 128

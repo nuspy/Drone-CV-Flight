@@ -1,0 +1,37 @@
+[
+  {
+    "utc": "2026-06-21T10:00:00+00:00",
+    "lat": 45.4642,
+    "lon": 9.19,
+    "sun_azimuth_deg": 134.8107,
+    "sun_elevation_deg": 62.0411
+  },
+  {
+    "utc": "2026-06-21T16:30:00+00:00",
+    "lat": 45.4642,
+    "lon": 9.19,
+    "sun_azimuth_deg": 277.8733,
+    "sun_elevation_deg": 25.9302
+  },
+  {
+    "utc": "2026-03-20T12:00:00+00:00",
+    "lat": 0.0,
+    "lon": 0.0,
+    "sun_azimuth_deg": 91.335,
+    "sun_elevation_deg": 88.1412
+  },
+  {
+    "utc": "2026-12-21T09:00:00+00:00",
+    "lat": -33.8688,
+    "lon": 151.2093,
+    "sun_azimuth_deg": 241.4954,
+    "sun_elevation_deg": 0.6136
+  },
+  {
+    "utc": "2026-09-23T06:00:00+00:00",
+    "lat": 51.5074,
+    "lon": -0.1278,
+    "sun_azimuth_deg": 91.4315,
+    "sun_elevation_deg": 1.3789
+  }
+]

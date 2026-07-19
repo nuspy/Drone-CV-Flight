@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dronecv"
+version = "0.1.0"
+description = "GPS-denied autonomous drone visual navigation: Unity/headless-sim training, redundant visual localization, guidance and automated reliability testing"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pydantic>=2.6",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "pymap3d>=3.1",
+    "jinja2>=3.1",
+    "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+dronecv = "dronecv.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "e2e: full end-to-end pipeline tests (slow)",
+    "integration: multi-module tests (medium)",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

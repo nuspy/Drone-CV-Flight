@@ -1,0 +1,104 @@
+# Global defaults. Per-environment files in configs/envs/ override these,
+# and CLI flags override both. Validated by dronecv.config.
+env:
+  name: null            # set by the env file
+  kind: headless        # headless | unity
+  seed: 0
+  # Geo anchor fallback (used when the sim does not embed geo metadata).
+  # anchor.source records where the anchor came from at runtime.
+  anchor:
+    lat0: 45.4642       # deg, latitude of the Unity/world origin
+    lon0: 9.1900        # deg
+    alt0: 120.0         # m MSL of the origin
+    true_north_offset_deg: 0.0   # compass bearing of the sim +Z (north) axis
+  # UTC time the simulation clock starts at (celestial cues depend on it)
+  start_utc: "2026-06-21T10:00:00Z"
+
+sim:
+  host: 127.0.0.1
+  port: 7601
+  sensor_hz: 5.0        # sensor_frame streaming rate
+  image_width: 96
+  image_height: 96
+  fov_deg: 70.0
+  camera_tilt_deg: 35.0 # fixed downward tilt of the drone camera
+  lidar:
+    max_range_m: 120.0
+    noise_sigma_m: 0.05
+    dropout_prob: 0.01
+  drone:
+    max_speed_ms: 12.0
+    max_climb_ms: 4.0
+    max_yaw_rate_dps: 90.0
+    response_tau_s: 0.6 # first-order lag of velocity command tracking
+
+world: # headless sim only
+  size_m: 1000.0        # side of the square world
+  height_scale_m: 60.0
+  n_landmarks: 30
+  grid: 128             # terrain heightmap resolution
+
+capture:
+  altitudes_agl_m: [40.0, 80.0]
+  yaw_bins: 8
+  grid_spacing_m: 75.0
+  orbit_radius_m: 60.0
+  orbit_points: 12
+  image_format: jpeg    # jpeg | png (lossless)
+  jpeg_quality: 92
+
+training:
+  batch_size: 32
+  lr: 1.0e-3
+  epochs_per_round: 12
+  embedding_dim: 128
+  backbone_width: 32    # channel multiplier of TinyConvNet
+  triplet_margin: 0.3
+  pos_radius_m: 30.0    # captures closer than this (and within yaw window) are positives
+  pos_yaw_deg: 60.0
+  val_cell_m: 50.0      # spatial holdout cell size
+  val_fraction: 0.15
+  num_workers: 2
+
+active_loop:
+  budget_captures: 4000
+  max_rounds: 6
+  initial_fraction: 0.35   # share of budget spent on round-1 grid+orbit capture
+  growth_fraction: 0.5     # each refinement round adds ~initial*growth captures
+  probe_captures: 150      # fresh never-trained probes per evaluation
+  thresholds:
+    p95_pos_err_m: 12.0
+    p95_alt_err_m: 6.0
+    max_ece: 0.15
+  plateau_epsilon: 0.05    # relative improvement below this counts as plateau
+  plateau_rounds: 2
+
+localization:
+  retrieval_topk: 5
+  gate_chi2: 9.21          # 99% for 2 dof
+  apr_sigma_floor_m: 1.5
+  vo_min_inliers: 25
+  sun_min_elevation_deg: 5.0
+  lost_reject_streak: 12   # consecutive gated-out absolute fixes => lost mode
+  process:
+    accel_sigma: 1.2       # m/s^2 random-walk driving noise
+    yaw_rate_sigma_dps: 10.0
+
+guidance:
+  standoff_m: 10.0
+  arrival_tol_m: 3.0
+  alt_tol_m: 2.0
+  cruise_speed_ms: 8.0
+  min_confidence: 0.25     # below this the controller holds position
+
+harness:
+  episodes: 5
+  time_cap_s: 240.0
+  visual_target_fraction: 0.4
+  kidnap_test: true
+  pass_thresholds:         # CI/reliability gate; report exit code
+    p95_pos_err_m: 15.0
+    reach_success_rate: 0.6
+
+report:
+  out_dir: artifacts

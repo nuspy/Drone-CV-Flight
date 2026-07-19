@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Project artifacts (datasets, models, reports are generated)
+artifacts/
+
+# Unity (the package itself is versioned; these are project-level leftovers)
+unity/**/Library/
+unity/**/Temp/
+unity/**/Logs/
+unity/**/obj/
+*.csproj.user
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

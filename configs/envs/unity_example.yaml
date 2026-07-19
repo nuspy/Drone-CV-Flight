@@ -1,0 +1,32 @@
+# Example Unity environment. Start the Unity scene with the DroneCV bridge
+# (see docs/unity_setup.md), then: dronecv run-all --env unity_example
+#
+# If the Unity environment embeds geo metadata (dronecv_geo.json sidecar or a
+# GeoAnchorAsset), it is used automatically and the anchor below is only a
+# fallback.
+env:
+  name: unity_example
+  kind: unity
+  seed: 0
+  anchor:
+    lat0: 45.4642
+    lon0: 9.1900
+    alt0: 120.0
+    true_north_offset_deg: 0.0
+
+sim:
+  host: 127.0.0.1
+  port: 7601
+  image_width: 224
+  image_height: 224
+
+capture:
+  altitudes_agl_m: [40.0, 80.0, 120.0]
+  grid_spacing_m: 75.0
+
+training:
+  backbone_width: 48
+  epochs_per_round: 15
+
+active_loop:
+  budget_captures: 8000
