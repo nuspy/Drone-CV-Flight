@@ -50,6 +50,7 @@ class SimConfig(StrictModel):
     host: str = "127.0.0.1"
     port: int = 7601
     sensor_hz: float = 5.0
+    realtime: bool = False  # False: tick as fast as consumers allow (CI)
     image_width: int = 96
     image_height: int = 96
     fov_deg: float = 70.0
@@ -63,6 +64,9 @@ class WorldConfig(StrictModel):
     height_scale_m: float = 60.0
     n_landmarks: int = 30
     grid: int = 128
+    # Whether the headless sim reports geo metadata in hello_ack (exercises the
+    # "embedded metadata" anchor path; False exercises the env-config fallback).
+    embed_geo_meta: bool = True
 
 
 class CaptureConfig(StrictModel):
