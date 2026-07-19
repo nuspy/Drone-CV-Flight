@@ -143,6 +143,9 @@ class HarnessConfig(StrictModel):
     time_cap_s: float = 240.0
     visual_target_fraction: float = 0.4
     kidnap_test: bool = True
+    # True-distance radius within which a declared arrival counts as success.
+    # Scale it with the environment's achievable localization accuracy.
+    success_radius_m: float = 15.0
     pass_thresholds: PassThresholds = Field(default_factory=PassThresholds)
 
 
