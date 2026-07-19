@@ -44,7 +44,7 @@ def test_handshake_and_geo_meta(cfg):
         assert client.geo_meta is not None
         assert client.geo_meta["lat0"] == pytest.approx(45.4642)
         info = await client.env_info()
-        assert info.bounds_max_sim[0] == pytest.approx(250.0)
+        assert info.bounds_max_sim[0] == pytest.approx(cfg.world.size_m / 2)
         await client.close()
 
     run(_with_server(cfg, scenario))
