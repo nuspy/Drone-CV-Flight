@@ -66,16 +66,25 @@ class World:
         # Albedo: two independent noise fields drive a palette between
         # green/brown/grey bands plus a low-frequency regional tint, so distant
         # regions of the map look different (localizable ground texture).
-        n1 = _value_noise(gen, g, octaves=5)
-        n2 = _value_noise(gen, g, octaves=3)
+        # The albedo texture is 4x the terrain grid and carries HIGH-FREQUENCY
+        # per-texel detail (speckle, sharp patches). Smooth noise alone gives
+        # feature detectors nothing to grip: ORB found literally zero corners
+        # on an early smooth-only version of this texture.
+        tg = g * 4
+        n1 = _value_noise(gen, tg, octaves=6)
+        n2 = _value_noise(gen, tg, octaves=3)
         palette_a = np.array([0.30, 0.42, 0.22])  # vegetation
         palette_b = np.array([0.52, 0.42, 0.30])  # soil
         palette_c = np.array([0.55, 0.55, 0.55])  # rock
         base = palette_a[None, None] * (1 - n1[..., None]) + palette_b[None, None] * n1[..., None]
-        rocky = np.clip((self.heightmap / max(cfg.height_scale_m, 1e-6) - 0.55) * 3.0, 0, 1)[..., None]
+        hm_up = np.kron(self.heightmap, np.ones((4, 4), dtype=np.float32))
+        rocky = np.clip((hm_up / max(cfg.height_scale_m, 1e-6) - 0.55) * 3.0, 0, 1)[..., None]
         albedo = base * (1 - rocky) + palette_c[None, None] * rocky
         tint = (n2[..., None] - 0.5) * np.array([0.20, 0.10, 0.25])[None, None]
-        self.albedo = np.clip(albedo + tint, 0.05, 0.95).astype(np.float32)
+        speckle = gen.uniform(-0.09, 0.09, (tg, tg, 1))
+        patches = (gen.random((tg, tg, 1)) < 0.04) * gen.uniform(-0.35, 0.35, (tg, tg, 1))
+        self.albedo = np.clip(albedo + tint + speckle + patches, 0.05, 0.95).astype(np.float32)
+        self._tex_grid = tg
 
         self.landmarks = self._place_landmarks(gen)
 
@@ -109,9 +118,10 @@ class World:
         return n / np.linalg.norm(n, axis=-1, keepdims=True)
 
     def albedo_at(self, x: np.ndarray, z: np.ndarray) -> np.ndarray:
-        u, v = self._grid_coords(x, z)
-        u0, v0 = u.astype(int), v.astype(int)
-        return self.albedo[v0, u0]
+        tg = self._tex_grid
+        u = np.clip((np.asarray(x) + self.half) / self.size * (tg - 1), 0, tg - 1.000001)
+        v = np.clip((np.asarray(z) + self.half) / self.size * (tg - 1), 0, tg - 1.000001)
+        return self.albedo[v.astype(int), u.astype(int)]
 
     # ---------------------------------------------------------------- landmarks
 

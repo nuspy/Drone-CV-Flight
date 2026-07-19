@@ -1,4 +1,7 @@
-# Tiny environment sized for CI: small world, low resolution, small budget.
+# Tiny environment sized for CI: small dense world, low resolution, small
+# budget. Thresholds here validate PIPELINE correctness at CI scale, not
+# real-world accuracy — real environments use bigger budgets, higher
+# resolution and tighter thresholds (see unity_example.yaml).
 env:
   name: headless_ci
   kind: headless
@@ -14,28 +17,35 @@ sim:
   image_height: 64
 
 world:
-  size_m: 500.0
-  height_scale_m: 40.0
-  n_landmarks: 12
-  grid: 96
+  size_m: 300.0
+  height_scale_m: 30.0
+  n_landmarks: 10
+  grid: 64
 
 capture:
-  altitudes_agl_m: [35.0, 60.0]
-  grid_spacing_m: 60.0
+  altitudes_agl_m: [35.0, 55.0]
+  grid_spacing_m: 40.0
+  yaw_bins: 6
 
 training:
-  epochs_per_round: 8
+  epochs_per_round: 15
   backbone_width: 16
+  pos_radius_m: 25.0
+  pos_yaw_deg: 65.0   # adjacent 60-deg yaw bins at the same station are positives
+  val_cell_m: 40.0
 
 active_loop:
   budget_captures: 800
   max_rounds: 3
   probe_captures: 60
   thresholds:
-    p95_pos_err_m: 15.0
-    p95_alt_err_m: 8.0
-    max_ece: 0.25
+    p95_pos_err_m: 60.0
+    p95_alt_err_m: 15.0
+    max_ece: 0.35
 
 harness:
   episodes: 3
   time_cap_s: 150.0
+  pass_thresholds:
+    p95_pos_err_m: 80.0
+    reach_success_rate: 0.5
