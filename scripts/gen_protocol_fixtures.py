@@ -51,6 +51,18 @@ def main() -> None:
     fixture.write_text(json.dumps(cases, indent=2) + "\n")
     print(f"wrote {fixture.name}")
 
+    # Mirror everything into the Unity package so its EditMode tests are
+    # self-contained (FramesConversionTests / CelestialTests / CodecGoldenTests).
+    import shutil
+
+    unity_fixtures = ROOT / "unity" / "com.dronecv.flight" / "Tests" / "Fixtures"
+    (unity_fixtures / "protocol").mkdir(parents=True, exist_ok=True)
+    for src in [ROOT / "tests" / "fixtures" / "frames_cases.json", fixture]:
+        shutil.copy2(src, unity_fixtures / src.name)
+    for src in out.glob("*.bin"):
+        shutil.copy2(src, unity_fixtures / "protocol" / src.name)
+    print(f"mirrored fixtures into {unity_fixtures}")
+
 
 if __name__ == "__main__":
     main()

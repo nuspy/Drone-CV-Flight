@@ -1,0 +1,60 @@
+[
+  {
+    "name": "identity_axes_east",
+    "pos_sim": [1.0, 0.0, 0.0],
+    "true_north_offset_deg": 0.0,
+    "expected_enu": [1.0, 0.0, 0.0],
+    "quat_sim": [0.0, 0.0, 0.0, 1.0],
+    "expected_heading_deg": 0.0
+  },
+  {
+    "name": "identity_axes_up",
+    "pos_sim": [0.0, 1.0, 0.0],
+    "true_north_offset_deg": 0.0,
+    "expected_enu": [0.0, 0.0, 1.0]
+  },
+  {
+    "name": "identity_axes_north",
+    "pos_sim": [0.0, 0.0, 1.0],
+    "true_north_offset_deg": 0.0,
+    "expected_enu": [0.0, 1.0, 0.0]
+  },
+  {
+    "name": "offset90_forward_becomes_east",
+    "pos_sim": [0.0, 0.0, 1.0],
+    "true_north_offset_deg": 90.0,
+    "expected_enu": [1.0, 0.0, 0.0],
+    "quat_sim": [0.0, 0.0, 0.0, 1.0],
+    "expected_heading_deg": 90.0
+  },
+  {
+    "name": "offset45_diagonal",
+    "pos_sim": [0.0, 0.0, 1.0],
+    "true_north_offset_deg": 45.0,
+    "expected_enu": [0.7071067811865476, 0.7071067811865476, 0.0],
+    "quat_sim": [0.0, 0.0, 0.0, 1.0],
+    "expected_heading_deg": 45.0
+  },
+  {
+    "name": "unity_yaw90_zero_offset",
+    "pos_sim": [10.0, 5.0, -3.0],
+    "true_north_offset_deg": 0.0,
+    "expected_enu": [10.0, -3.0, 5.0],
+    "quat_sim": [0.0, 0.7071067811865476, 0.0, 0.7071067811865476],
+    "expected_heading_deg": 90.0
+  },
+  {
+    "name": "unity_yaw90_offset30",
+    "pos_sim": [0.0, 0.0, 1.0],
+    "true_north_offset_deg": 30.0,
+    "expected_enu": [0.5, 0.8660254037844387, 0.0],
+    "quat_sim": [0.0, 0.7071067811865476, 0.0, 0.7071067811865476],
+    "expected_heading_deg": 120.0
+  },
+  {
+    "name": "negative_offset",
+    "pos_sim": [1.0, 2.0, 3.0],
+    "true_north_offset_deg": -90.0,
+    "expected_enu": [-3.0, 1.0, 2.0]
+  }
+]
