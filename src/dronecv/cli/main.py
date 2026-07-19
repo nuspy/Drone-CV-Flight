@@ -164,6 +164,42 @@ def export(
     console.print(f"[green]mobile bundle exported to {out}[/green]")
 
 
+gis_app = typer.Typer(help="Build flyable environments from real GIS data (no Unity)")
+app.add_typer(gis_app, name="gis")
+
+
+@gis_app.command("build")
+def gis_build(
+    env_name: str = typer.Option(..., "--env-name", help="Name for the new environment"),
+    place: str = typer.Option(None, "--place", help="Place name (Nominatim geocoding)"),
+    bbox: str = typer.Option(None, "--bbox", help="lat1,lon1,lat2,lon2"),
+    mask: str = typer.Option(None, "--mask", help="GeoJSON polygon mask"),
+    ortho: str = typer.Option(None, "--ortho", help="GeoTIFF orthophoto (enables shadow heights + drape)"),
+    ortho_utc: str = typer.Option(None, "--ortho-utc", help="Orthophoto acquisition time, ISO-8601 UTC"),
+    res: float = typer.Option(1.0, "--res", help="Mosaic resolution m/px"),
+) -> None:
+    """Download DEM + buildings + landcover and build a flyable environment."""
+    from dronecv.commands.gis_cmd import run_gis_build
+
+    run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res)
+
+
+@gis_app.command("info")
+def gis_info(bbox: str = typer.Option(..., "--bbox")) -> None:
+    """Source coverage report for an area (DEM tiles, buildings, heights)."""
+    from dronecv.commands.gis_cmd import run_gis_info
+
+    run_gis_info(bbox)
+
+
+@gis_app.command("gui")
+def gis_gui() -> None:
+    """Desktop GUI: search a place, draw the area mask, check coverage, build."""
+    from dronecv.gui.app import run_gui
+
+    run_gui()
+
+
 protocol_app = typer.Typer(help="Protocol utilities")
 app.add_typer(protocol_app, name="protocol")
 

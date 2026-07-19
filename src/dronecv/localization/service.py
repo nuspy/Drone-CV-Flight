@@ -5,6 +5,7 @@ into geo estimates. This is exactly what would run on a companion computer."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 from dronecv.config import Config
 from dronecv.geo.anchor import GeoAnchor
@@ -18,18 +19,30 @@ log = get_logger("dronecv.service")
 
 
 class LocalizationService:
-    def __init__(self, cfg: Config, bundle: ModelBundle):
+    def __init__(self, cfg: Config, bundle: ModelBundle | Path):
+        """`bundle`: a loaded ModelBundle, or a bundle DIRECTORY path — a
+        directory containing tiling.json routes through TiledLocalizer."""
         self.cfg = cfg
         self.bundle = bundle
         self.client: SimClient | None = None
-        self.localizer: Localizer | None = None
+        self.localizer = None
 
     async def connect(self, host: str | None = None, port: int | None = None) -> None:
+        from pathlib import Path as _Path
+
         self.client = await SimClient.connect(
             host or self.cfg.sim.host, port or self.cfg.sim.port, role="localizer"
         )
         anchor = GeoAnchor.resolve(self.cfg.env.anchor, self.client.geo_meta)
-        self.localizer = Localizer(self.cfg, self.bundle, anchor)
+        if isinstance(self.bundle, (_Path, str)):
+            from dronecv.localization.tile_router import TiledLocalizer, is_tiled_bundle
+
+            if is_tiled_bundle(self.bundle):
+                self.localizer = TiledLocalizer(self.cfg, _Path(self.bundle), anchor)
+            else:
+                self.localizer = Localizer(self.cfg, ModelBundle.load(_Path(self.bundle)), anchor)
+        else:
+            self.localizer = Localizer(self.cfg, self.bundle, anchor)
         await self.client.subscribe(["sensors"])
         log.info(f"localizing against {self.client.ack.sim_kind} sim '{self.client.ack.env_id}'")
 

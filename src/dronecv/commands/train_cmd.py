@@ -19,9 +19,14 @@ def run_train(env: str, rounds: int | None, budget: int | None, seed: int | None
 
     import asyncio
 
-    from dronecv.training.active_loop import run_active_loop
+    if cfg.active_loop.tile_m > 0:
+        from dronecv.training.tiled import run_tiled_training
 
-    result = asyncio.run(run_active_loop(cfg))
+        result = asyncio.run(run_tiled_training(cfg))
+    else:
+        from dronecv.training.active_loop import run_active_loop
+
+        result = asyncio.run(run_active_loop(cfg))
     metrics = result["final_metrics"]
     console.print(
         metric_table(

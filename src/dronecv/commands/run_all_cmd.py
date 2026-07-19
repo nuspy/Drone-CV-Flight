@@ -30,9 +30,14 @@ def run_all_pipeline(
 
     if bundle_path is None:
         console.print("[bold cyan]stage 1/2 — training (active loop, auto-sizing data)[/bold cyan]")
-        from dronecv.training.active_loop import run_active_loop
+        if cfg.active_loop.tile_m > 0:
+            from dronecv.training.tiled import run_tiled_training
 
-        result = asyncio.run(run_active_loop(cfg))
+            result = asyncio.run(run_tiled_training(cfg))
+        else:
+            from dronecv.training.active_loop import run_active_loop
+
+            result = asyncio.run(run_active_loop(cfg))
         console.print(
             f"training finished: [bold]{result['stop_reason']}[/bold] after {result['rounds']} rounds, "
             f"{result['captures_used']} captures"

@@ -1,0 +1,99 @@
+"""Ground classes (roads, water, green, rail) from OSM via Overpass.
+
+Only used for the shape-first albedo (class color bands) and as weak texture
+for the localizer — geometry stays the authoritative signal.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dronecv.gis.geometry import BBox
+from dronecv.util.logging import get_logger
+
+log = get_logger("dronecv.gis.landcover")
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# class name -> (class id, priority when overlapping). Building ids live in
+# the same class raster starting at BUILDING_CLASS_BASE (see raster.py).
+GROUND_CLASSES = {
+    "ground": 0,
+    "green": 1,
+    "water": 2,
+    "road": 3,
+    "rail": 4,
+    "parking": 5,
+}
+
+
+@dataclass
+class LandcoverFeature:
+    kind: str  # one of GROUND_CLASSES
+    ring_lonlat: list[tuple[float, float]] | None = None  # polygons
+    line_lonlat: list[tuple[float, float]] | None = None  # ways to buffer
+    width_m: float = 0.0
+    holes_lonlat: list[list[tuple[float, float]]] = field(default_factory=list)
+
+
+def _road_width(tags: dict) -> float:
+    highway = tags.get("highway", "")
+    return {
+        "motorway": 16.0, "trunk": 14.0, "primary": 10.0, "secondary": 8.0,
+        "tertiary": 7.0, "residential": 6.0, "unclassified": 5.0, "service": 4.0,
+    }.get(highway, 4.0)
+
+
+class OverpassLandcover:
+    def __init__(self, fixture_path: Path | None = None, url: str = OVERPASS_URL):
+        self.fixture_path = fixture_path
+        self.url = url
+
+    def fetch(self, bbox: BBox) -> list[LandcoverFeature]:
+        return parse_overpass_landcover(self._raw(bbox))
+
+    def _raw(self, bbox: BBox) -> dict:
+        if self.fixture_path is not None:
+            return json.loads(Path(self.fixture_path).read_text())
+        import httpx
+
+        b = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
+        query = (
+            f"[out:json][timeout:180];("
+            f'way["highway"]{b};way["railway"~"^(rail|tram)$"]{b};'
+            f'way["natural"="water"]{b};way["waterway"="riverbank"]{b};'
+            f'way["landuse"~"^(grass|forest|meadow|farmland|orchard|vineyard)$"]{b};'
+            f'way["leisure"~"^(park|garden|pitch)$"]{b};way["natural"~"^(wood|scrub)$"]{b};'
+            f'way["amenity"="parking"]{b};'
+            f");out body geom;"
+        )
+        log.info(f"querying Overpass for landcover in {bbox}")
+        resp = httpx.post(self.url, data={"data": query}, timeout=240.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
+def parse_overpass_landcover(data: dict) -> list[LandcoverFeature]:
+    feats: list[LandcoverFeature] = []
+    for el in data.get("elements", []):
+        if el.get("type") != "way" or "geometry" not in el:
+            continue
+        tags = el.get("tags", {})
+        pts = [(g["lon"], g["lat"]) for g in el["geometry"]]
+        closed = len(pts) >= 4 and pts[0] == pts[-1]
+        if "highway" in tags:
+            feats.append(LandcoverFeature("road", line_lonlat=pts, width_m=_road_width(tags)))
+        elif "railway" in tags:
+            feats.append(LandcoverFeature("rail", line_lonlat=pts, width_m=5.0))
+        elif tags.get("natural") == "water" or tags.get("waterway") == "riverbank":
+            if closed:
+                feats.append(LandcoverFeature("water", ring_lonlat=pts))
+        elif tags.get("amenity") == "parking":
+            if closed:
+                feats.append(LandcoverFeature("parking", ring_lonlat=pts))
+        elif closed:
+            feats.append(LandcoverFeature("green", ring_lonlat=pts))
+    log.info(f"parsed {len(feats)} landcover features")
+    return feats

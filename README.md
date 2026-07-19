@@ -68,6 +68,22 @@ dronecv report open --env headless_ci
 Individual stages: `dronecv sim | capture | train | evaluate | localize |
 test-flight | protocol verify`.
 
+## Real-world environments from GIS data (no Unity)
+
+`dronecv gis` builds a flyable environment from open data — Copernicus DEM +
+OSM buildings (real heights, or inferred from satellite **shadow lengths**
+via the sun ephemeris, or class defaults) — with adaptive POV concentration
+(distinctive landmarks need fewer views than repetitive districts) and
+hierarchical tiling for large areas:
+
+```bash
+dronecv gis build --place "Siena" --env-name siena   # or --bbox / --mask polygon
+dronecv run-all --env siena                          # localizer now outputs REAL GPS
+dronecv gis gui                                      # desktop GUI: map, mask drawing, coverage
+```
+
+See `docs/gis.md` for sources, licensing and the height-inference chain.
+
 ## Quick test with a photo (and the Android app)
 
 Because localization is image-based, a single photo of a trained environment

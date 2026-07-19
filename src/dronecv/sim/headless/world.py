@@ -161,13 +161,20 @@ class World:
     # ------------------------------------------------------------------- bounds
 
     @property
+    def max_height(self) -> float:
+        return float(self.heightmap.max())
+
+    @property
+    def min_height(self) -> float:
+        return float(self.heightmap.min())
+
+    @property
     def bounds_min(self) -> np.ndarray:
         return np.array([-self.half, 0.0, -self.half])
 
     @property
     def bounds_max(self) -> np.ndarray:
-        top = float(self.heightmap.max()) + 160.0
-        return np.array([self.half, top, self.half])
+        return np.array([self.half, self.max_height + 160.0, self.half])
 
     def spawn_position(self, gen: np.random.Generator, agl_m: float = 50.0) -> np.ndarray:
         x = float(gen.uniform(-0.7, 0.7) * self.half)

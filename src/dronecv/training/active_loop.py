@@ -50,7 +50,10 @@ def _targeted_cells(metrics: dict, threshold_m: float) -> list[tuple[float, floa
     ]
 
 
-async def run_active_loop(cfg: Config) -> dict:
+async def run_active_loop(cfg: Config, bounds_sim: tuple | None = None) -> dict:
+    """`bounds_sim=(bmin, bmax)` restricts capture/eval to a sub-volume — the
+    hierarchical tile trainer uses it to train one tile at a time (with the
+    artifact paths scoped by cfg.env.name, which it suffixes per tile)."""
     al = cfg.active_loop
     history: list[dict] = []
     captures_used = 0
@@ -62,22 +65,27 @@ async def run_active_loop(cfg: Config) -> dict:
         try:
             collector = Collector(cfg, client, anchor)
             info = await collector.env_info()
-            bmin, bmax = np.array(info.bounds_min_sim), np.array(info.bounds_max_sim)
+            if bounds_sim is not None:
+                bmin, bmax = np.array(bounds_sim[0]), np.array(bounds_sim[1])
+            else:
+                bmin, bmax = np.array(info.bounds_min_sim), np.array(info.bounds_max_sim)
 
             # ---- round 0 capture: broad coverage ----
             if (cfg.dataset_dir / "meta.jsonl").exists():
                 log.info(f"resuming with existing dataset at {cfg.dataset_dir}")
             else:
                 n0 = max(32, int(al.budget_captures * al.initial_fraction))
-                poses = planner.grid_plan(bmin, bmax, cfg.capture)
-                # A few orbit clusters around random interest points add
-                # multi-perspective views of the same structures.
-                gen = np.random.default_rng(cfg.env.seed + 101)
-                pts = [
-                    (float(gen.uniform(bmin[0] * 0.6, bmax[0] * 0.6)), float(gen.uniform(bmin[2] * 0.6, bmax[2] * 0.6)))
-                    for _ in range(6)
-                ]
-                poses += planner.orbit_plan(pts, cfg.capture)
+                density_fn, orbit_pts = _saliency_prior(cfg)
+                poses = planner.grid_plan(bmin, bmax, cfg.capture, density=density_fn)
+                # Orbit clusters: saliency anchors (GIS worlds: tallest/most
+                # distinctive structures) or random interest points otherwise.
+                if not orbit_pts:
+                    gen = np.random.default_rng(cfg.env.seed + 101)
+                    orbit_pts = [
+                        (float(gen.uniform(bmin[0] * 0.6, bmax[0] * 0.6)), float(gen.uniform(bmin[2] * 0.6, bmax[2] * 0.6)))
+                        for _ in range(6)
+                    ]
+                poses += planner.orbit_plan(orbit_pts[:12], cfg.capture)
                 poses = planner.shuffle_and_cap(poses, n0, cfg.env.seed)
                 captures_used += await collector.collect(poses, cfg.dataset_dir, "capture r0 (grid+orbit)")
 
@@ -187,6 +195,43 @@ async def run_active_loop(cfg: Config) -> dict:
         "final_metrics": final_metrics,
         "history": history,
     }
+
+
+def _saliency_prior(cfg: Config):
+    """(density_fn, orbit_points) from a GIS world's saliency map; (None, [])
+    for procedural/unity environments."""
+    if cfg.world.kind != "gis" or not cfg.world.gis_dir:
+        return None, []
+    import json
+    from pathlib import Path
+
+    gis_dir = Path(cfg.world.gis_dir)
+    orbit: list[tuple[float, float]] = []
+    density_fn = None
+    meta_path = gis_dir / "meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        orbit = [(float(e), float(n)) for e, n in meta.get("orbit_points", [])]
+    sal_path = gis_dir / "saliency.json"
+    if sal_path.exists():
+        sal = json.loads(sal_path.read_text())
+        dens = np.array(sal["density_multiplier"], dtype=float)
+        cell = float(sal["cell_m"])
+        meta = json.loads(meta_path.read_text())
+        e0, n0 = float(meta["e0"]), float(meta["n0"])
+
+        def density_fn(x: float, z: float) -> float:  # sim x=E, z=N (gis worlds)
+            r = int((z - n0) // cell)
+            c = int((x - e0) // cell)
+            if 0 <= r < dens.shape[0] and 0 <= c < dens.shape[1]:
+                return float(dens[r, c])
+            return 1.0
+
+        log.info(
+            f"saliency prior active: mean density x{sal['mean_density_multiplier']:.2f}, "
+            f"{len(orbit)} orbit anchors"
+        )
+    return density_fn, orbit
 
 
 def _cells_to_sim(cells: list[tuple[float, float, float]], anchor) -> list[tuple[float, float, float]]:

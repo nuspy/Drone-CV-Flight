@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dronecv.cli.console import console, metric_table
 from dronecv.config import Config, load_config
+from dronecv.geo.anchor import GeoAnchor
 
 
 def run_test_flight(env: str, bundle_path: str | None, episodes: int | None, seed: int | None) -> int:
@@ -22,9 +23,11 @@ async def run_test_flight_async(cfg: Config, bundle_path: str | None) -> int:
     from dronecv.commands.common import sim_endpoint
     from dronecv.harness.flight_test import FlightTestHarness
     from dronecv.harness.report import write_report
+    from dronecv.localization.tile_router import is_tiled_bundle
     from dronecv.training.bundle import ModelBundle
 
-    bundle = ModelBundle.load(Path(bundle_path) if bundle_path else cfg.bundle_dir)
+    bundle_dir = Path(bundle_path) if bundle_path else cfg.bundle_dir
+    bundle = bundle_dir if is_tiled_bundle(bundle_dir) else ModelBundle.load(bundle_dir)
     async with sim_endpoint(cfg) as (host, port):
         cfg.sim.host, cfg.sim.port = host, port
         harness = FlightTestHarness(cfg, bundle)
@@ -50,7 +53,15 @@ async def run_test_flight_async(cfg: Config, bundle_path: str | None) -> int:
         }
 
     path = write_report(
-        cfg.report_dir, cfg.env.name or "?", bundle.anchor.to_dict(), results, training_report
+        cfg.report_dir,
+        cfg.env.name or "?",
+        (
+            bundle.anchor.to_dict()
+            if isinstance(bundle, ModelBundle)
+            else GeoAnchor.resolve(cfg.env.anchor, None).to_dict()
+        ),
+        results,
+        training_report,
     )
     acc, reach = results["accuracy"], results["reach"]
     console.print(

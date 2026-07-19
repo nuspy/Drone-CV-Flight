@@ -60,6 +60,10 @@ class SimConfig(StrictModel):
 
 
 class WorldConfig(StrictModel):
+    # "procedural": seeded synthetic world. "gis": a real area built by
+    # `dronecv gis build` (requires gis_dir pointing at the store).
+    kind: Literal["procedural", "gis"] = "procedural"
+    gis_dir: str | None = None
     size_m: float = 1000.0
     height_scale_m: float = 60.0
     n_landmarks: int = 30
@@ -100,6 +104,10 @@ class Thresholds(StrictModel):
 
 
 class ActiveLoopConfig(StrictModel):
+    # >0 enables hierarchical training for large areas: per-tile fine bundles
+    # of this size plus a coarse global "which tile" model (budget applies
+    # PER TILE). 0 = single training domain.
+    tile_m: float = 0.0
     budget_captures: int = 4000
     max_rounds: int = 6
     initial_fraction: float = 0.35

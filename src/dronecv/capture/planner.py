@@ -41,20 +41,32 @@ def grid_plan(
     bounds_max: np.ndarray,
     cfg: CaptureConfig,
     margin_frac: float = 0.08,
+    density=None,
 ) -> list[CapturePose]:
+    """Lawnmower grid. `density(x, z) -> multiplier` (e.g. the GIS saliency
+    prior: repetitive areas ~2x, distinctive ones ~0.5x) modulates the station
+    density: the grid is generated finer and stations are kept with
+    probability proportional to the local multiplier (deterministic hash, so
+    plans are reproducible)."""
     x0, x1 = float(bounds_min[0]), float(bounds_max[0])
     z0, z1 = float(bounds_min[2]), float(bounds_max[2])
     mx, mz = (x1 - x0) * margin_frac, (z1 - z0) * margin_frac
-    xs = np.arange(x0 + mx, x1 - mx + 1e-6, cfg.grid_spacing_m)
-    zs = np.arange(z0 + mz, z1 - mz + 1e-6, cfg.grid_spacing_m)
+    d_max = 2.2 if density is not None else 1.0
+    spacing = cfg.grid_spacing_m / np.sqrt(d_max)
+    xs = np.arange(x0 + mx, x1 - mx + 1e-6, spacing)
+    zs = np.arange(z0 + mz, z1 - mz + 1e-6, spacing)
     yaws = np.linspace(0.0, 360.0, cfg.yaw_bins, endpoint=False)
-    poses = [
-        CapturePose(float(x), float(z), float(agl), float(yaw), 0.0)
-        for x in xs
-        for z in zs
-        for agl in cfg.altitudes_agl_m
-        for yaw in yaws
-    ]
+    poses = []
+    for x in xs:
+        for z in zs:
+            if density is not None:
+                keep_p = float(density(x, z)) / d_max
+                h = (int(x * 7.31) * 73856093) ^ (int(z * 7.31) * 19349663)
+                if ((h & 0xFFFF) / 65535.0) > keep_p:
+                    continue
+            for agl in cfg.altitudes_agl_m:
+                for yaw in yaws:
+                    poses.append(CapturePose(float(x), float(z), float(agl), float(yaw), 0.0))
     return poses
 
 

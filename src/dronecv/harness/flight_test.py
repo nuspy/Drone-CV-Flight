@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -104,9 +105,32 @@ class TruthTracker:
 
 
 class FlightTestHarness:
-    def __init__(self, cfg: Config, bundle: ModelBundle):
+    def __init__(self, cfg: Config, bundle: ModelBundle | Path):
+        """`bundle`: single ModelBundle, or a tiled bundle directory (from
+        hierarchical training). Tiled mode uses coordinate targets only and
+        resolves terrain via the tile bundle under the target."""
         self.cfg = cfg
         self.bundle = bundle
+        self._tiled = not isinstance(bundle, ModelBundle)
+        self._tile_cache: dict[str, ModelBundle] = {}
+        if self._tiled:
+            import json as _json
+
+            self._tiles = _json.loads((Path(bundle) / "tiling.json").read_text())["tiles"]
+
+    def _bundle_at(self, e: float, n: float) -> ModelBundle:
+        """The fine bundle responsible for a position (single-bundle mode:
+        the bundle itself)."""
+        if not self._tiled:
+            return self.bundle
+        from dronecv.training.tiled import tile_of
+
+        tile = tile_of(self._tiles, e, n) or self._tiles[0]
+        if tile["id"] not in self._tile_cache:
+            if len(self._tile_cache) > 2:
+                self._tile_cache.pop(next(iter(self._tile_cache)))
+            self._tile_cache[tile["id"]] = ModelBundle.load(Path(self.bundle) / "tiles" / tile["id"])
+        return self._tile_cache[tile["id"]]
 
     # ------------------------------------------------------------ entry point
 
@@ -262,11 +286,11 @@ class FlightTestHarness:
             # Pick a target: random point well inside the world, at terrain+AGL.
             half = self.cfg.world.size_m * 0.35
             te, tn = float(gen.uniform(-half, half)), float(gen.uniform(-half, half))
-            ground = self.bundle.terrain.elevation(te, tn)
+            ground = self._bundle_at(te, tn).terrain.elevation(te, tn)
             t_alt = ground + float(gen.uniform(35.0, 60.0))
             target_enu = np.array([te, tn, t_alt])
 
-            visual = gen.random() < self.cfg.harness.visual_target_fraction
+            visual = (not self._tiled) and gen.random() < self.cfg.harness.visual_target_fraction
             if visual:
                 # Photograph the target location through the harness client and
                 # hand ONLY the image to the guidance stack.

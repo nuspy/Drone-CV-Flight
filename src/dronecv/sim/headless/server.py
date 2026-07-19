@@ -28,6 +28,17 @@ log = get_logger("dronecv.sim")
 CAPABILITIES = ["capture", "depth", "sun", "truth", "teleport", "reset"]
 
 
+def make_world(world_cfg, seed: int):
+    """World factory: procedural (default) or a built GIS area."""
+    if world_cfg.kind == "gis":
+        if not world_cfg.gis_dir:
+            raise ValueError("world.kind=gis requires world.gis_dir in the env config")
+        from dronecv.gis.world import GisWorld
+
+        return GisWorld.open(world_cfg.gis_dir)
+    return World(world_cfg, seed)
+
+
 class _Client:
     def __init__(self, conn: Connection):
         self.conn = conn
@@ -39,7 +50,7 @@ class HeadlessSimServer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.anchor = GeoAnchor.resolve(cfg.env.anchor, None)
-        self.world = World(cfg.world, cfg.env.seed)
+        self.world = make_world(cfg.world, cfg.env.seed)
         self.drone = DroneBody(cfg.sim.drone)
         self._start_utc = datetime.fromisoformat(cfg.env.start_utc)
         self.sky = CelestialModel(self.anchor, self._start_utc)
@@ -133,8 +144,8 @@ class HeadlessSimServer:
                 m.EnvInfo(
                     bounds_min_sim=[float(v) for v in self.world.bounds_min],
                     bounds_max_sim=[float(v) for v in self.world.bounds_max],
-                    ground_alt_min_m=float(self.world.heightmap.min()),
-                    ground_alt_max_m=float(self.world.heightmap.max()),
+                    ground_alt_min_m=self.world.min_height,
+                    ground_alt_max_m=self.world.max_height,
                     sim_time=self.sim_time,
                 )
             )

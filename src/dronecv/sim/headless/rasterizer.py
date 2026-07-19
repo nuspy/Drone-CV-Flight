@@ -57,8 +57,7 @@ def _march_terrain(world: World, origin: np.ndarray, dirs: np.ndarray, max_range
     active = np.ones(n, dtype=bool)
 
     # Rays starting above the highest terrain and pointing up can never hit.
-    max_h = float(world.heightmap.max())
-    if origin[1] > max_h:
+    if origin[1] > world.max_height:
         active &= flat[:, 1] < 0
 
     # Geometric step schedule: fine near the camera, coarse far away. A ray
