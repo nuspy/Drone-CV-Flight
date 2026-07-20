@@ -63,6 +63,7 @@ def build_environment(
     reconstruct_buildings: bool = False,
     imagery: str | None = None,
     imagery_res_m: float = 10.0,
+    palette_photos_dir: Path | None = None,
 ) -> Path:
     """`reconstruct_buildings` extracts extra footprints from imagery and
     merges them where GIS vectors have nothing (see
@@ -205,8 +206,14 @@ def build_environment(
             poi_stats["n_photos"] = len(photos)
 
     # ---- 3D territory features: forests, bridges, rail embankments ----
-    from dronecv.gis.vegetation import build_vegetation, stamp_bridges, stamp_rail_embankment
+    from dronecv.gis.vegetation import (
+        build_vegetation,
+        stamp_bridges,
+        stamp_rail_embankment,
+        vegetation_from_imagery,
+    )
 
+    imagery_veg_stats = vegetation_from_imagery(store, ortho)
     veg_stats = build_vegetation(store)
     n_bridges = stamp_bridges(store, anchor, landcover)
     n_rail = stamp_rail_embankment(store)
@@ -222,10 +229,33 @@ def build_environment(
         **b_stats,
         "n_landcover": len(landcover),
         **poi_stats,
+        **imagery_veg_stats,
         **veg_stats,
         "n_bridges": n_bridges,
         "n_rail_texels": n_rail,
     }
+
+    # ---- zone palette: roofs/walls from photos of the area + ortho roofs ----
+    from dronecv.gis.palette import extract_palette
+
+    photo_dirs = [gis_dir / "photos"]
+    if palette_photos_dir is not None:
+        photo_dirs.append(Path(palette_photos_dir))
+    roof_pixels = None
+    if ortho is not None and ortho.rgb is not None:
+        rs, cs = np.nonzero(np.asarray(store.build_h) > 0)
+        if len(rs):
+            step = max(1, len(rs) // 100_000)
+            rs, cs = rs[::step], cs[::step]
+            ge = meta.e0 + (cs + 0.5) * res_m
+            gn = meta.n0 + (rs + 0.5) * res_m
+            pr = np.clip(((gn - ortho.n0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[0] - 1)
+            pc = np.clip(((ge - ortho.e0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[1] - 1)
+            roof_pixels = ortho.rgb[pr, pc]
+    palette = extract_palette(photo_dirs, roof_pixels=roof_pixels)
+    palette.save(gis_dir)
+    meta.stats["palette"] = {"n_roof_px": palette.n_roof_px, "n_wall_px": palette.n_wall_px,
+                             "sources": palette.sources}
 
     # ---- saliency prior + orbit anchors ----
     saliency = compute_saliency(store)

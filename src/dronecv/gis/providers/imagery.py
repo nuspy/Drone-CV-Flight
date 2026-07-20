@@ -36,6 +36,9 @@ class OrthoImage:
     e0: float
     n0: float
     utc: datetime | None = None
+    # Optional color channels (HxWx3 float [0,1], same grid as `gray`) —
+    # used by palette extraction (roof colors) and vegetation green-spots.
+    rgb: np.ndarray | None = None
 
     def sample(self, e: np.ndarray, n: np.ndarray) -> np.ndarray:
         r = np.clip((np.asarray(n) - self.n0) / self.res_m, 0, self.gray.shape[0] - 1)
@@ -61,6 +64,10 @@ def load_geotiff_ortho(
         data = src.read()
         gray = data.mean(axis=0).astype(np.float32)
         gray /= max(float(gray.max()), 1e-6)
+        color = None
+        if data.shape[0] >= 3:
+            color = np.moveaxis(data[:3], 0, -1).astype(np.float32)
+            color /= max(float(color.max()), 1e-6)
         # Corner coordinates -> ENU extent.
         rows = [0, src.height]
         cols = [0, src.width]
@@ -94,6 +101,7 @@ def load_geotiff_ortho(
         rr = np.clip(np.round(rr).astype(int), 0, src.height - 1)
         cc = np.clip(np.round(cc).astype(int), 0, src.width - 1)
         resampled = gray[rr, cc].reshape(out_h, out_w)
+        rgb_res = color[rr, cc].reshape(out_h, out_w, 3) if color is not None else None
 
     return OrthoImage(
         gray=resampled,
@@ -101,4 +109,5 @@ def load_geotiff_ortho(
         e0=e0,
         n0=n0,
         utc=utc,
+        rgb=rgb_res,
     )

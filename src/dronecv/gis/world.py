@@ -64,6 +64,20 @@ class GisWorld:
         self._speckle_lut = np.full(32, DEFAULT_SPECKLE, dtype=np.float32)
         for cid, amp in CLASS_SPECKLE.items():
             self._speckle_lut[cid] = amp
+        # Zone palette (extracted from photos of the area, palette.json):
+        # roof clusters recolor the building classes, wall clusters give
+        # facades their OWN colors — the azimuth color belongs to roofs only.
+        from dronecv.gis.palette import ZonePalette
+
+        pal = ZonePalette.load(store.root)
+        if pal is not None:
+            for cid in (10, 11, 13):  # generic/residential/commercial roofs
+                self._color_lut[cid] = pal.roof[(cid - 10) % len(pal.roof)]
+        self._wall_lut = np.array(
+            (pal.wall if pal is not None else
+             [(0.85, 0.80, 0.70), (0.90, 0.87, 0.80), (0.78, 0.70, 0.58)]),
+            dtype=np.float32,
+        )
         self.landmarks: list = []  # no analytic primitives: buildings live in the heightfield
 
     @classmethod
@@ -114,17 +128,25 @@ class GisWorld:
             base = self.store.albedo[rn, cn].astype(np.float32) / 255.0
         else:
             base = self._color_lut[cls].copy()
-        # Building WALLS darker than roofs: a texel whose build_h differs
-        # sharply from a neighbor is a facade. Roof stays bright, the outline
-        # + facades go dark — silhouettes become readable at any sun angle.
+        # Building WALLS get their OWN color, not the roof's: a texel whose
+        # build_h differs sharply from a neighbor is a facade, and real
+        # facades are plaster (white/cream per the zone palette), never tile
+        # terracotta. Blend toward the wall cluster on the facade fringe;
+        # 16 m spatial hash keeps one facade's tone coherent.
         bh = self.store.build_h
         rn1 = np.minimum(rn + 1, self._h - 1)
         cn1 = np.minimum(cn + 1, self._w - 1)
         step = np.maximum(
             np.abs(bh[rn, cn] - bh[rn1, cn]), np.abs(bh[rn, cn] - bh[rn, cn1])
         )
-        wall = np.clip(step / 6.0, 0.0, 1.0)  # >=6 m jump -> full facade shade
-        base = base * (1.0 - 0.45 * wall)[..., None]
+        wall = np.clip(step / 6.0, 0.0, 1.0)  # >=6 m jump -> full facade
+        blk = max(1, int(16.0 / self.res))
+        wall_idx = (
+            ((rn // blk) * np.int64(40503) ^ (cn // blk) * np.int64(30011))
+            % len(self._wall_lut)
+        )
+        wall_color = self._wall_lut[wall_idx] * 0.92  # facades sit in part shade
+        base = base * (1.0 - wall)[..., None] + wall_color * wall[..., None]
         # Deterministic per-texel speckle: gives feature detectors texture
         # without storing anything (hash of the integer texel coordinates).
         hashes = (rn * np.int64(73856093)) ^ (cn * np.int64(19349663))

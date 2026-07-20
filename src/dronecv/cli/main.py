@@ -187,12 +187,16 @@ def gis_build(
         "'xyz:<url-template>' (you own the provider ToS)",
     ),
     imagery_res: float = typer.Option(10.0, "--imagery-res", help="Imagery resolution m/px"),
+    palette_photos: str = typer.Option(
+        None, "--palette-photos",
+        help="Folder of photos of the area for roof/wall palette extraction",
+    ),
 ) -> None:
     """Download DEM + buildings + landcover and build a flyable environment."""
     from dronecv.commands.gis_cmd import run_gis_build
 
     run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res,
-                  reconstruct, imagery, imagery_res)
+                  reconstruct, imagery, imagery_res, palette_photos)
 
 
 @gis_app.command("info")

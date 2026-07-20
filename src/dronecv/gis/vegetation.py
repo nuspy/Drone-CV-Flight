@@ -31,6 +31,51 @@ def _texel_hash(rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     return (h & 0xFFFF).astype(np.float32) / 65535.0
 
 
+def vegetation_from_imagery(store: GisStore, ortho) -> dict:
+    """Green spots on the color orthophoto -> green/forest ground classes.
+
+    Vector data misses plenty of real vegetation (street trees, river banks,
+    private gardens). Green-dominant pixels on still-unclassified ground
+    become `green`; where the green density over a ~25 m window is high the
+    texel is upgraded to `forest_broadleaf`, which the canopy pass then turns
+    into visible 3D tree cover. Runs BEFORE build_vegetation."""
+    if ortho is None or getattr(ortho, "rgb", None) is None:
+        return {"imagery_green_texels": 0}
+    import cv2
+
+    meta = store.meta
+    win = 2048
+    n_green = n_forest = 0
+    density_win = max(3, int(25.0 / meta.res_m) | 1)
+    for r0 in range(0, meta.height, win):
+        r1 = min(r0 + win, meta.height)
+        for c0 in range(0, meta.width, win):
+            c1 = min(c0 + win, meta.width)
+            rows = np.arange(r0, r1)
+            cols = np.arange(c0, c1)
+            ge = meta.e0 + (cols + 0.5) * meta.res_m
+            gn = meta.n0 + (rows + 0.5) * meta.res_m
+            pr = np.clip(((gn - ortho.n0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[0] - 1)
+            pc = np.clip(((ge - ortho.e0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[1] - 1)
+            rgb = ortho.rgb[pr[:, None], pc[None, :]]
+            r_, g_, b_ = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+            green = (g_ > r_ + 0.03) & (g_ > b_ + 0.02) & (g_ > 0.10)
+            cls = np.asarray(store.class_id[r0:r1, c0:c1])
+            paintable = green & (cls == 0)  # never overwrite water/roads/buildings
+            density = cv2.boxFilter(
+                green.astype(np.float32), -1, (density_win, density_win)
+            )
+            forest = paintable & (density > 0.55)
+            cls_new = cls.copy()
+            cls_new[paintable] = GROUND_CLASSES["green"]
+            cls_new[forest] = GROUND_CLASSES["forest_broadleaf"]
+            store.class_id[r0:r1, c0:c1] = cls_new
+            n_green += int(paintable.sum())
+            n_forest += int(forest.sum())
+    log.info(f"imagery vegetation: {n_green} green texels ({n_forest} dense -> forest)")
+    return {"imagery_green_texels": n_green, "imagery_forest_texels": n_forest}
+
+
 def build_vegetation(store: GisStore) -> dict:
     """Fill veg_h from the forest classes already rasterized in class_id."""
     win = 2048

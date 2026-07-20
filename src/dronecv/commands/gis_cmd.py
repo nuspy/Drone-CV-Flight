@@ -18,6 +18,7 @@ def run_gis_build(
     reconstruct: bool = False,
     imagery: str | None = None,
     imagery_res: float = 10.0,
+    palette_photos: str | None = None,
 ) -> None:
     from dronecv.config import find_config_root
     from dronecv.gis.geometry import parse_bbox
@@ -45,6 +46,7 @@ def run_gis_build(
         reconstruct_buildings=reconstruct,
         imagery=imagery,
         imagery_res_m=imagery_res,
+        palette_photos_dir=Path(palette_photos) if palette_photos else None,
     )
     meta = json.loads((gis_dir / "meta.json").read_text())
     stats = meta["stats"]

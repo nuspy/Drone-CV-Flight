@@ -95,15 +95,16 @@ def fetch_wms_ortho(
     }
     resp = httpx.get(wms_url, params=params, timeout=timeout_s)
     resp.raise_for_status()
-    img = cv2.imdecode(np.frombuffer(resp.content, np.uint8), cv2.IMREAD_GRAYSCALE)
+    img = cv2.imdecode(np.frombuffer(resp.content, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise RuntimeError(f"WMS response is not an image ({resp.headers.get('content-type')})")
-    gray = img.astype(np.float32) / 255.0
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     # WMS row 0 = north; the store convention is row 0 = south.
-    gray = gray[::-1].copy()
-    gray = cv2.resize(gray, (w, h), interpolation=cv2.INTER_AREA)
+    rgb = rgb[::-1].copy()
+    rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_AREA)
+    gray = rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
     log.info(f"WMS ortho {w}x{h} @ {res_m} m/px from {wms_url}")
-    return OrthoImage(gray=gray, res_m=res_m, e0=e_min, n0=n_min, utc=None)
+    return OrthoImage(gray=gray, res_m=res_m, e0=e_min, n0=n_min, utc=None, rgb=rgb)
 
 
 def fetch_xyz_ortho(

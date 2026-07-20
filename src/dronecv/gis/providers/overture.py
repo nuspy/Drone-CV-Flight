@@ -255,8 +255,19 @@ class OvertureBuildingsProvider:
         return buildings
 
 
+# Overture land / land_use subtype/class -> our ground classes.
+GREEN_OF_OVERTURE = {
+    "forest": "forest_broadleaf", "wood": "forest_broadleaf", "tree": "forest_broadleaf",
+    "shrub": "green", "shrubbery": "green", "scrub": "green",
+    "grass": "green", "grassland": "green", "meadow": "green",
+    "park": "green", "garden": "green", "cemetery": "green",
+    "recreation_ground": "green", "golf_course": "green", "vineyard": "green",
+    "orchard": "green", "allotments": "green", "village_green": "green",
+}
+
+
 class OvertureLandcoverProvider:
-    """Water polygons + road segments from Overture -> LandcoverFeatures."""
+    """Water polygons + road segments + green/forest areas from Overture."""
 
     def __init__(self, release: str | None = None):
         self.release = release
@@ -265,6 +276,29 @@ class OvertureLandcoverProvider:
         release = self.release or latest_release()
         index = _FooterIndex()
         feats: list[LandcoverFeature] = []
+
+        # Green + forest polygons (vegetation layer needs the forest classes).
+        for theme, type_ in (("base", "land"), ("base", "land_use")):
+            for key, rgs in scan_files_parallel(
+                index, list_theme_files(release, theme, type_), bbox
+            ):
+                url = f"{BUCKET}/{key}"
+                table = index.read_rows(url, rgs, ["geometry", "subtype", "class"], bbox)
+                for wkb_val, st, cl in zip(
+                    table.column("geometry").to_pylist(),
+                    table.column("subtype").to_pylist(),
+                    table.column("class").to_pylist(),
+                    strict=True,
+                ):
+                    kind = GREEN_OF_OVERTURE.get(str(cl or "").lower()) or GREEN_OF_OVERTURE.get(
+                        str(st or "").lower()
+                    )
+                    if kind is None:
+                        continue
+                    for poly in _wkb_rings(wkb_val):
+                        feats.append(
+                            LandcoverFeature(kind, ring_lonlat=list(poly.exterior.coords))
+                        )
 
         for key, rgs in scan_files_parallel(index, list_theme_files(release, "base", "water"), bbox):
             url = f"{BUCKET}/{key}"
@@ -297,3 +331,61 @@ class OvertureLandcoverProvider:
                     feats.append(LandcoverFeature("road", line_lonlat=list(line.coords), width_m=width))
         log.info(f"overture landcover: {len(feats)} features")
         return feats
+
+
+# Overture places category fragments -> landmark archetypes (see gis/poi.py).
+ARCHETYPE_OF_CATEGORY = [
+    ("castle", "crenellated"), ("fortress", "crenellated"), ("fort", "crenellated"),
+    ("church", "dome"), ("cathedral", "dome"), ("basilica", "dome"),
+    ("mosque", "dome"), ("synagogue", "dome"),
+    ("tower", "spire_tower"), ("lighthouse", "spire_tower"),
+    ("monument", "spire_tower"), ("landmark", None), ("tourist_attraction", None),
+    ("historic", None), ("government_building", None), ("city_hall", None),
+]
+
+
+class OverturePoiProvider:
+    """POIs from the Overture `places` theme -> (Poi, []) — same contract as
+    OverpassPoi, so archetype stamping, building matching and Wikimedia photo
+    fetch work unchanged. Overture has no building:part geometries."""
+
+    def __init__(self, release: str | None = None):
+        self.release = release
+
+    def fetch(self, bbox: BBox):
+        from shapely import wkb as swkb
+
+        from dronecv.gis.providers.poi import Poi
+
+        release = self.release or latest_release()
+        index = _FooterIndex()
+        pois: list[Poi] = []
+        for key, rgs in scan_files_parallel(
+            index, list_theme_files(release, "places", "place"), bbox
+        ):
+            url = f"{BUCKET}/{key}"
+            table = index.read_rows(url, rgs, ["geometry", "names", "categories"], bbox)
+            for wkb_val, names, cats in zip(
+                table.column("geometry").to_pylist(),
+                table.column("names").to_pylist(),
+                table.column("categories").to_pylist(),
+                strict=True,
+            ):
+                cat_primary = str((cats or {}).get("primary") or "").lower()
+                alternates = [str(c).lower() for c in ((cats or {}).get("alternate") or [])]
+                arch, relevant = None, False
+                for frag, a in ARCHETYPE_OF_CATEGORY:
+                    if frag in cat_primary or any(frag in c for c in alternates):
+                        relevant = True
+                        arch = arch or a
+                if not relevant:
+                    continue
+                geom = swkb.loads(wkb_val)
+                pt = geom.centroid
+                name = (names or {}).get("primary")
+                pois.append(Poi(
+                    name=name, archetype=arch, lonlat=(float(pt.x), float(pt.y)),
+                    tags={"overture_category": cat_primary},
+                ))
+        log.info(f"overture places: {len(pois)} landmark POIs in bbox")
+        return pois, []

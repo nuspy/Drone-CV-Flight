@@ -53,12 +53,14 @@ def build(source: str, res_m: float) -> None:
         from dronecv.gis.providers.overture import (
             OvertureBuildingsProvider,
             OvertureLandcoverProvider,
+            OverturePoiProvider,
         )
 
         sources = BuildSources(
             dem=CopernicusDem(),
             buildings=OvertureBuildingsProvider(),
             landcover=OvertureLandcoverProvider(),
+            poi=OverturePoiProvider(),
         )
     else:
         from dronecv.gis.providers.buildings import OverpassBuildings
@@ -74,6 +76,7 @@ def build(source: str, res_m: float) -> None:
     build_environment(
         bbox, ENV_NAME, out_root=ROOT / "artifacts" / "gis", configs_root=ROOT,
         sources=sources, res_m=res_m,
+        palette_photos_dir=ROOT / "tests" / "data" / "budapest_photos",
     )
 
 
