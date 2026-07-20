@@ -181,8 +181,20 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
     lines = {"note": "ENU meters; classes from splatmap; centerlines not vectorized in v1"}
     (out_dir / "lines.json").write_text(json.dumps(lines))
 
+    # Sun position for scene lighting (same reference time as the renders).
+    from datetime import UTC, datetime
+
+    from dronecv.geo import celestial
+
+    sun = celestial.sun_position(
+        datetime(2026, 6, 21, 10, 0, tzinfo=UTC),
+        float(meta.anchor["lat0"]), float(meta.anchor["lon0"]),
+    )
+
     (out_dir / "scene_meta.json").write_text(json.dumps({
         "anchor": meta.anchor,
+        "sun_azimuth_deg": round(sun.azimuth_deg, 2),
+        "sun_elevation_deg": round(sun.elevation_deg, 2),
         "extent_e_m": meta.width * meta.res_m,
         "extent_n_m": meta.height * meta.res_m,
         "e0": meta.e0,

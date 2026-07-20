@@ -120,6 +120,10 @@ with automatic hand-off at tile borders. Storage: mosaics are disk memmaps
   water/parking remain ground classes carved into the albedo/splat.
 - Mountains/orography come from the DEM as before.
 
+> The export pipeline is also a standalone product — see
+> [3d_product.md](3d_product.md) for the Unity/Blender/CAD profile, formats
+> and output licensing.
+
 ## Scene export (Unity Terrain / Blender)
 
 ```bash

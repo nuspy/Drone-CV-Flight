@@ -234,6 +234,43 @@ def gis_export_scene(
     )
 
 
+@gis_app.command("export-blender")
+def gis_export_blender(
+    env: str = typer.Option(..., "--env", help="A built GIS environment"),
+    blend: str = typer.Option(None, "--blend", help="Output .blend path (default artifacts/gis/<env>/scene_export/<env>.blend)"),
+    resolution: int = typer.Option(513, "--terrain-res", help="Terrain heightmap resolution (2^n+1)"),
+) -> None:
+    """Produce a native .blend of the environment (LoD2 buildings with
+    materials, forests, sun). Runs Blender headless if it is installed;
+    otherwise exports the assets and prints the exact command to run."""
+    import shutil as _shutil
+    import subprocess
+    from pathlib import Path
+
+    from dronecv.config import load_config
+    from dronecv.gis.export.scene_export import export_scene
+
+    cfg = load_config(env)
+    if cfg.world.kind != "gis" or not cfg.world.gis_dir:
+        console.print(f"[red]'{env}' is not a GIS environment[/red]")
+        raise SystemExit(2)
+    gis_dir = Path(cfg.world.gis_dir)
+    out_dir = gis_dir / "scene_export"
+    export_scene(gis_dir, out_dir, resolution)
+    blend_path = Path(blend) if blend else out_dir / f"{env}.blend"
+    blender = _shutil.which("blender")
+    cmd = ["blender", "--background", "--python", str(out_dir / "blender_build_scene.py"),
+           "--", str(out_dir), str(blend_path)]
+    if blender:
+        subprocess.run([blender, *cmd[1:]], check=True)
+        console.print(f"[green]saved {blend_path}[/green]")
+    else:
+        console.print(
+            f"[yellow]Blender not found on PATH[/yellow] — assets are ready in {out_dir}.\n"
+            f"Run on a machine with Blender:\n[bold]{' '.join(cmd)}[/bold]"
+        )
+
+
 @gis_app.command("gui")
 def gis_gui() -> None:
     """Desktop GUI: search a place, draw the area mask, check coverage, build."""

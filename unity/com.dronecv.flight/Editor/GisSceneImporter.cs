@@ -116,6 +116,31 @@ namespace DroneCV.Flight.Editor
 
         private static void ImportBuildings(string dir)
         {
+            // Preferred: scene.glb (LoD2 roofs + PBR palette materials +
+            // facade texture). Needs a glTF importer package (glTFast /
+            // com.unity.cloud.gltfast) installed — then the copied .glb
+            // imports automatically with materials; the OBJ fallback below
+            // stays for projects without one.
+            var glb = Path.Combine(dir, "scene.glb");
+            if (File.Exists(glb))
+            {
+                Directory.CreateDirectory("Assets/DroneCVImported");
+                var glbDst = "Assets/DroneCVImported/scene.glb";
+                File.Copy(glb, glbDst, true);
+                AssetDatabase.ImportAsset(glbDst);
+                var glbPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(glbDst);
+                if (glbPrefab != null)
+                {
+                    var scene = Object.Instantiate(glbPrefab);
+                    scene.name = "DroneCV GIS Scene (glTF)";
+                    foreach (var mf in scene.GetComponentsInChildren<MeshFilter>())
+                        mf.gameObject.AddComponent<MeshCollider>();
+                    return; // glTF path replaces the OBJ buildings
+                }
+                Debug.LogWarning("[DroneCV] scene.glb copied but no glTF importer " +
+                                 "package found — falling back to buildings.obj " +
+                                 "(install com.unity.cloud.gltfast for materials).");
+            }
             var src = Path.Combine(dir, "buildings.obj");
             if (!File.Exists(src)) return;
             Directory.CreateDirectory("Assets/DroneCVImported");
