@@ -149,8 +149,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         done = Signal(dict)
         failed = Signal(str)
 
-        def __init__(self, bbox: BBox):
-            super().__init__()
+        def __init__(self, bbox: BBox, parent=None):
+            super().__init__(parent)
             self.bbox = bbox
 
         def run(self) -> None:
@@ -166,8 +166,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         failed = Signal(str)
         progress = Signal(str)
 
-        def __init__(self, kwargs: dict):
-            super().__init__()
+        def __init__(self, kwargs: dict, parent=None):
+            super().__init__(parent)
             self.kwargs = kwargs
 
         def run(self) -> None:
@@ -189,7 +189,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.setWindowTitle("DroneCV — GIS environment builder")
             self.resize(1280, 800)
             self.state = GuiState()
-            self._cov_workers: list = []
+            self._threads: list = []  # every QThread ever started, pruned lazily
             self._cov_generation = 0
 
             # ---- left panel ----
@@ -299,8 +299,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             # counter so only the LATEST result updates the panel.
             self._cov_generation += 1
             gen = self._cov_generation
-            worker = CoverageWorker(bbox)
-            self._cov_workers.append(worker)
+            worker = CoverageWorker(bbox, parent=self)
+            self._register(worker)
             worker.done.connect(
                 lambda rep, g=gen: self.on_coverage(rep) if g == self._cov_generation else None
             )
@@ -308,7 +308,6 @@ def run_gui() -> None:  # pragma: no cover - requires a display
                 lambda e, g=gen: self.status.setText(f"coverage failed: {e}")
                 if g == self._cov_generation else None
             )
-            worker.finished.connect(lambda w=worker: self._drop_worker(w))
             worker.start()
 
         def on_mask_deleted(self) -> None:
@@ -319,15 +318,19 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.coverage_view.setPlainText("")
             self._refresh_ready()
 
-        def _drop_worker(self, worker) -> None:
-            if worker in self._cov_workers:
-                self._cov_workers.remove(worker)
+        def _register(self, worker) -> None:
+            """Track EVERY QThread (coverage AND build). References are kept
+            until the thread has finished — Qt aborts the whole app if a
+            running QThread is destroyed — and pruned lazily, never from a
+            finished-signal handler."""
+            self._threads = [t for t in self._threads if t.isRunning()]
+            self._threads.append(worker)
 
         def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-            # Give running coverage threads a moment; then detach hard so a
-            # long network call cannot block the window from closing.
-            for w in list(self._cov_workers):
-                if not w.wait(1500):
+            # Give running threads a moment; then detach hard so a long
+            # network call or build cannot block the window from closing.
+            for w in list(self._threads):
+                if w.isRunning() and not w.wait(1500):
                     w.terminate()
                     w.wait(500)
             super().closeEvent(event)
@@ -384,11 +387,12 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         def on_build(self) -> None:
             self.build_btn.setEnabled(False)
             self.progress.setVisible(True)
-            self.worker = BuildWorker(self.state.build_kwargs())
-            self.worker.progress.connect(self.status.setText)
-            self.worker.done.connect(self.on_built)
-            self.worker.failed.connect(self.on_build_failed)
-            self.worker.start()
+            worker = BuildWorker(self.state.build_kwargs(), parent=self)
+            self._register(worker)
+            worker.progress.connect(self.status.setText)
+            worker.done.connect(self.on_built)
+            worker.failed.connect(self.on_build_failed)
+            worker.start()
 
         def on_built(self, gis_dir: str) -> None:
             self.progress.setVisible(False)
