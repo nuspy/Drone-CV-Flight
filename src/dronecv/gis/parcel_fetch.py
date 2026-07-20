@@ -155,12 +155,24 @@ def fetch_cells(
     fallback_source_version: str | None = None,
     fallback_cache=None,
     on_status: Callable[[Cell, str], None] | None = None,
+    concurrency: int | None = None,
 ) -> tuple[list, CellReport]:
     """Fetch every cell (skipping cached / skipped ones). Returns
-    (list-of-per-cell-results, CellReport). `decide` defaults to DEFER."""
+    (list-of-per-cell-results, CellReport). `decide` defaults to DEFER.
+
+    Two phases so the interactive failure dialog stays sane (one question at a
+    time) while downloads run in parallel:
+      A. download every missing cell CONCURRENTLY (auto-degrading to sequential
+         the moment a mirror starts blocking), caching successes and collecting
+         failures;
+      B. apply `decide` to the failures IN ORDER (skip/fallback/defer/abort).
+    """
+    import threading
+
     report = CellReport(kind=kind, n_total=len(cells))
-    per_cell: list = []
     decide = decide or (lambda cell, err, sig: Decision.DEFER)
+    results: dict[str, object] = {}
+    lock = threading.Lock()
 
     def status(cell: Cell, s: str):
         if on_status:
@@ -170,66 +182,110 @@ def fetch_cells(
     to_fetch = [c for c in cells if not cache.has(c.id) and not cache.is_skipped(c.id)]
     prefetched = _try_region(kind, to_fetch, provider, cache, status)
 
+    # ---- classify: cached / skipped / prefetched vs. still-pending ----
+    pending: list[Cell] = []
     for cell in cells:
         if cache.is_skipped(cell.id):
+            results[cell.id] = _empty(kind)
             report.skipped.append(cell.id)
-            per_cell.append(_empty(kind))
             status(cell, "skipped")
             continue
         blob = cache.get(cell.id)
         if blob is not None:
-            per_cell.append(_load(kind, blob))
+            results[cell.id] = _load(kind, blob)
             report.cached.append(cell.id)
             status(cell, "cached")
             continue
-        if cell.id in prefetched:  # filled by the batch pre-fetch
-            per_cell.append(_load(kind, cache.get(cell.id)))
+        if cell.id in prefetched:
+            results[cell.id] = _load(kind, cache.get(cell.id))
             report.fetched.append(cell.id)
             status(cell, "fetched")
             continue
+        pending.append(cell)
+
+    n_reuse = len(report.cached) + len(report.skipped)
+    if pending:
+        log.info(f"cells[{kind}]: resume {n_reuse}/{report.n_total} from cache "
+                 f"(dir: {cache.dir}); downloading {len(pending)} in parallel")
+
+    # ---- phase A: parallel download; collect failures ----
+    failures: dict[str, tuple[Cell, Exception]] = {}
+
+    def _download(cell: Cell) -> None:
         status(cell, "fetching")
         try:
             result = provider.fetch(cell.bbox)
-        except Exception as e:  # noqa: BLE001 — a FETCH failure -> decide
-            sig = _err_signature(e)
-            d = decide(cell, e, sig)
-            if d == Decision.ABORT:
-                report.failed[cell.id] = str(e)
-                status(cell, "aborted")
-                raise BuildAborted(f"build aborted at cell {cell.id}: {e}") from e
-            if d == Decision.SKIP:
-                cache.mark_skip(cell.id, str(e))
-                report.skipped.append(cell.id)
-                per_cell.append(_empty(kind))
-                status(cell, "skipped")
-            elif d == Decision.FALLBACK and fallback_provider is not None:
-                per_cell.append(
-                    _fallback_one(kind, cell, fallback_provider, fallback_cache, status)
-                )
-                report.fallback.append(cell.id)
-            else:  # DEFER (or FALLBACK without a fallback provider)
-                report.deferred.append(cell.id)
-                report.failed[cell.id] = str(e)
-                per_cell.append(_empty(kind))
-                status(cell, "deferred")
-        else:
-            # Fetch SUCCEEDED. Persist best-effort: a cache-write failure must
-            # never masquerade as a fetch failure (which would defer + discard
-            # good data and force a re-download next run). Use the data anyway.
-            try:
-                cache.put(cell.id, _dump(kind, result))
-            except Exception as ce:  # noqa: BLE001
-                log.warning(f"cell {cell.id} fetched but could NOT be cached "
-                            f"({ce}); it will be refetched next run. Cache dir: {cache.dir}")
-            per_cell.append(result)
+        except Exception as e:  # noqa: BLE001 — decided in phase B
+            with lock:
+                failures[cell.id] = (cell, e)
+            status(cell, "failed")
+            return
+        try:
+            cache.put(cell.id, _dump(kind, result))
+        except Exception as ce:  # noqa: BLE001 — caching is best-effort
+            log.warning(f"cell {cell.id} fetched but could NOT be cached ({ce}); "
+                        f"it will be refetched next run. Cache dir: {cache.dir}")
+        with lock:
+            results[cell.id] = result
             report.fetched.append(cell.id)
-            status(cell, "fetched")
-    n_reuse = len(report.cached) + len(report.skipped)
-    if n_reuse:
-        log.info(f"cells[{kind}]: resumed {n_reuse}/{report.n_total} from cache "
-                 f"(dir: {cache.dir})")
+        status(cell, "fetched")
+
+    _run_parallel(pending, _download, concurrency)
+
+    # ---- phase B: decide on failures, in cell order ----
+    for cell in cells:
+        if cell.id not in failures:
+            continue
+        _, e = failures[cell.id]
+        sig = _err_signature(e)
+        d = decide(cell, e, sig)
+        if d == Decision.ABORT:
+            report.failed[cell.id] = str(e)
+            status(cell, "aborted")
+            raise BuildAborted(f"build aborted at cell {cell.id}: {e}") from e
+        if d == Decision.SKIP:
+            cache.mark_skip(cell.id, str(e))
+            report.skipped.append(cell.id)
+            results[cell.id] = _empty(kind)
+            status(cell, "skipped")
+        elif d == Decision.FALLBACK and fallback_provider is not None:
+            results[cell.id] = _fallback_one(
+                kind, cell, fallback_provider, fallback_cache, status)
+            report.fallback.append(cell.id)
+        else:  # DEFER (or FALLBACK without a fallback provider)
+            report.deferred.append(cell.id)
+            report.failed[cell.id] = str(e)
+            results[cell.id] = _empty(kind)
+            status(cell, "deferred")
+
+    per_cell = [results[c.id] for c in cells]
     log.info(f"cells[{kind}]: {report.summary()}")
     return per_cell, report
+
+
+def _run_parallel(items: list, fn, concurrency: int | None) -> None:
+    """Run `fn(item)` over items in parallel WAVES. The wave width starts at
+    `concurrency` (auto if None) and drops to 1 the moment a mirror starts
+    blocking — "give up parallel automatically in real time" — recovering when
+    the cooldowns pass. Serial when width==1."""
+    if not items:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dronecv.gis.providers.overpass_http import download_concurrency, get_pool
+
+    width0 = concurrency if (concurrency and concurrency > 0) else download_concurrency()
+    pool = get_pool()
+    i = 0
+    while i < len(items):
+        width = 1 if (width0 > 1 and pool.any_blocked()) else max(1, width0)
+        batch = items[i:i + width]
+        if len(batch) == 1:
+            fn(batch[0])
+        else:
+            with ThreadPoolExecutor(max_workers=len(batch)) as ex:
+                list(ex.map(fn, batch))
+        i += len(batch)
 
 
 def _try_region(kind, cells, provider, cache, status) -> set[str]:
@@ -355,6 +411,7 @@ def fetch_vector(
     cache_root=None,
     decide: Callable[[Cell, Exception, str], Decision] | None = None,
     on_status: Callable[[Cell, str], None] | None = None,
+    concurrency: int | None = None,
 ):
     """Cell-based fetch of one vector kind for an AOI bbox. Returns
     (merged_result, CellReport). Handles cache setup, the FALLBACK provider,
@@ -375,6 +432,6 @@ def fetch_vector(
     per_cell, report = fetch_cells(
         kind, cells, provider, version, cache, decide=decide,
         fallback_provider=fb_provider, fallback_source_version=fb_version,
-        fallback_cache=fb_cache, on_status=on_status,
+        fallback_cache=fb_cache, on_status=on_status, concurrency=concurrency,
     )
     return merge_dedup(kind, per_cell), report
