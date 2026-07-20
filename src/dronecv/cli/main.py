@@ -197,12 +197,18 @@ def gis_build(
         help="Detect composite-mosaic strips in the imagery and align their "
         "exposure/tone automatically (on by default)",
     ),
+    allow_overture_fallback: bool = typer.Option(
+        False, "--allow-overture-fallback",
+        help="If OSM/Overpass is unavailable, automatically switch to Overture "
+        "instead of stopping (off by default — you stay in control of the source)",
+    ),
 ) -> None:
     """Download DEM + buildings + landcover and build a flyable environment."""
     from dronecv.commands.gis_cmd import run_gis_build
 
     run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res,
-                  reconstruct, imagery, imagery_res, palette_photos, ortho_normalize)
+                  reconstruct, imagery, imagery_res, palette_photos, ortho_normalize,
+                  allow_overture_fallback)
 
 
 @gis_app.command("info")

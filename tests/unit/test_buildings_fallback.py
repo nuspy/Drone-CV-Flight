@@ -25,7 +25,18 @@ def _sources(buildings):
     return BuildSources(dem=None, buildings=buildings, landcover=None, poi=None)
 
 
-def test_overpass_failure_falls_back_to_overture(monkeypatch):
+def test_overpass_failure_raises_by_default():
+    # DEFAULT: no silent source switch — the user stays in control.
+    sources = _sources(_FailingOverpass())
+    meta = _Meta()
+    with pytest.raises(RuntimeError, match="Overpass is unavailable"):
+        _fetch_buildings_resilient(sources, BBOX, meta)
+    assert "buildings_fallback" not in meta.stats
+    # sources were NOT mutated to Overture.
+    assert isinstance(sources.buildings, _FailingOverpass)
+
+
+def test_overpass_failure_falls_back_when_opted_in(monkeypatch):
     import dronecv.gis.providers.overture as ov
 
     sentinel = [Building(footprint_lonlat=[(19.0, 47.5)] * 4, height_m=12.0)]
@@ -46,7 +57,7 @@ def test_overpass_failure_falls_back_to_overture(monkeypatch):
 
     sources = _sources(_FailingOverpass())
     meta = _Meta()
-    out = _fetch_buildings_resilient(sources, BBOX, meta)
+    out = _fetch_buildings_resilient(sources, BBOX, meta, allow_overture_fallback=True)
 
     assert out is sentinel
     assert meta.stats["buildings_fallback"] == "overture"

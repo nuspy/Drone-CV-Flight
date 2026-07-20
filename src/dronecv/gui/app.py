@@ -38,6 +38,7 @@ class GuiState:
     imagery: str = "none"  # none | s2 | eox
     reconstruct: bool = False
     palette_photos: str | None = None
+    allow_overture_fallback: bool = False
 
     def set_mask(self, geojson_text: str) -> BBox:
         gj = json.loads(geojson_text)
@@ -84,6 +85,7 @@ class GuiState:
             "imagery": None if self.imagery == "none" else self.imagery,
             "reconstruct_buildings": self.reconstruct,
             "palette_photos_dir": Path(self.palette_photos) if self.palette_photos else None,
+            "allow_overture_fallback": self.allow_overture_fallback,
         }
         if self.selected_sources.get("buildings") == "overture":
             from dronecv.gis.pipeline import BuildSources
@@ -231,6 +233,9 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.reconstruct_check = QCheckBox("reconstruct buildings from imagery")
             self.reconstruct_check.stateChanged.connect(self._refresh_ready)
             cfg_form.addRow("", self.reconstruct_check)
+            self.fallback_check = QCheckBox("if OSM/Overpass fails, use Overture automatically")
+            self.fallback_check.stateChanged.connect(self._refresh_ready)
+            cfg_form.addRow("", self.fallback_check)
             self.palette_edit = QLineEdit(
                 placeholderText="folder of area photos for the color palette (optional)"
             )
@@ -378,6 +383,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.state.res_m = float(self.res_spin.value())
             self.state.imagery = self.imagery_combo.currentText().split(" ")[0]
             self.state.reconstruct = self.reconstruct_check.isChecked()
+            self.state.allow_overture_fallback = self.fallback_check.isChecked()
             self.state.palette_photos = self.palette_edit.text().strip() or None
             self.state.selected_sources["buildings"] = self.bld_combo.currentText()
             ok, why = self.state.can_build()

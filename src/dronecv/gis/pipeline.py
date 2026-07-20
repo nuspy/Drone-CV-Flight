@@ -49,20 +49,31 @@ class BuildSources:
     poi: object | None = None  # OverpassPoi (optional: POIs/landmarks/parts)
 
 
-def _fetch_buildings_resilient(sources: BuildSources, bbox: BBox, meta) -> list:
-    """Fetch buildings; if the source is Overpass and it fails entirely
-    (public mirrors flaky under load: 504 / read timeouts), fall back to
-    Overture Maps (public S3, no rate limits) for the whole OSM-sourced set —
-    buildings, landcover AND POIs — so a build that already downloaded the
-    DEM still completes. Mutates `sources` so the later landcover/POI fetches
-    use the same fallback provider."""
+def _fetch_buildings_resilient(
+    sources: BuildSources, bbox: BBox, meta, allow_overture_fallback: bool = False
+) -> list:
+    """Fetch buildings. If the source is Overpass and it fails entirely
+    (public mirrors flaky under load: 504 / read timeouts):
+
+    - `allow_overture_fallback=True` → switch the whole OSM-sourced set
+      (buildings + landcover + POIs) to Overture Maps and continue;
+    - otherwise (DEFAULT) → re-raise a clear, actionable error. No silent
+      source switch: the user stays in control of which data source is used.
+    """
     try:
         return sources.buildings.fetch(bbox)
     except Exception as e:  # noqa: BLE001
         if not isinstance(sources.buildings, OverpassBuildings):
             raise
+        if not allow_overture_fallback:
+            raise RuntimeError(
+                f"OpenStreetMap/Overpass is unavailable ({e}). The public "
+                "Overpass servers are overloaded (504) — try again shortly, or "
+                "switch the buildings source to Overture (GUI: Buildings -> "
+                "overture; CLI: pass Overture sources / --allow-overture-fallback)."
+            ) from e
         log.warning(f"Overpass unavailable ({e}); falling back to Overture Maps for "
-                    "buildings + landcover + POIs")
+                    "buildings + landcover + POIs (--allow-overture-fallback)")
         from dronecv.gis.providers.overture import (
             OvertureBuildingsProvider,
             OvertureLandcoverProvider,
@@ -93,6 +104,7 @@ def build_environment(
     imagery_res_m: float = 10.0,
     palette_photos_dir: Path | None = None,
     ortho_normalize: bool = True,
+    allow_overture_fallback: bool = False,
 ) -> Path:
     """`reconstruct_buildings` extracts extra footprints from imagery and
     merges them where GIS vectors have nothing (see
@@ -159,7 +171,7 @@ def build_environment(
     meta.ground_alt0 = float(ground_alt0 or 0.0)
 
     # ---- buildings: fetch, resolve heights (tags -> shadows -> defaults) ----
-    buildings = _fetch_buildings_resilient(sources, bbox, meta)
+    buildings = _fetch_buildings_resilient(sources, bbox, meta, allow_overture_fallback)
     ortho = sources.ortho
     if ortho is None and ortho_path is not None:
         from dronecv.gis.providers.imagery import load_geotiff_ortho

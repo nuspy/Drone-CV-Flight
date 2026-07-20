@@ -33,6 +33,13 @@ gis = [
     "pyproj>=3.6",
     "mapbox_earcut>=1.0",
     "pillow>=10.0",
+    # Overture Maps reads GeoParquet on S3 via fsspec+pyarrow; fsspec's
+    # HTTPFileSystem needs aiohttp+requests (else: "HTTPFileSystem requires
+    # requests and aiohttp to be installed").
+    "fsspec>=2024.0",
+    "pyarrow>=16.0",
+    "aiohttp>=3.9",
+    "requests>=2.31",
 ]
 gui = ["PySide6>=6.7"]
 

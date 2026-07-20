@@ -20,6 +20,7 @@ def run_gis_build(
     imagery_res: float = 10.0,
     palette_photos: str | None = None,
     ortho_normalize: bool = True,
+    allow_overture_fallback: bool = False,
 ) -> None:
     from dronecv.config import find_config_root
     from dronecv.gis.geometry import parse_bbox
@@ -49,6 +50,7 @@ def run_gis_build(
         imagery_res_m=imagery_res,
         palette_photos_dir=Path(palette_photos) if palette_photos else None,
         ortho_normalize=ortho_normalize,
+        allow_overture_fallback=allow_overture_fallback,
     )
     meta = json.loads((gis_dir / "meta.json").read_text())
     stats = meta["stats"]

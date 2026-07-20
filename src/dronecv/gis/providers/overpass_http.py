@@ -13,10 +13,12 @@ from dronecv.util.logging import get_logger
 
 log = get_logger("dronecv.gis.overpass")
 
+# overpass-api.de is the busiest public instance and 504s first under load,
+# so it is tried LAST — the community mirrors are usually less saturated.
 MIRRORS = [
-    "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
 ]
 HEADERS = {"User-Agent": "dronecv-gis/0.1 (+https://github.com/nuspy/Drone-CV-Flight)"}
 RETRYABLE = {403, 406, 429, 502, 503, 504}

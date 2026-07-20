@@ -296,7 +296,8 @@ sulle soglie dell'ambiente.
 |---|---|
 | pip bloccato per ore in "backtracking" | manca `-c constraints.txt`, oppure Python non è 3.11/3.12 (ricrea il venv: `py -3.12 -m venv .venv`) |
 | `the desktop GUI requires PySide6` | installa l'extra gui: `pip install -e ".[dev,gis,gui]" -c constraints.txt` |
-| Overpass 406 / 403 / 429 / 504 / timeout | gestito automaticamente: User-Agent identificativo, fallback sui mirror pubblici e — se durante un build falliscono TUTTI i mirror — fallback automatico a Overture (edifici + landcover + POI). Per saltare del tutto Overpass, scegli Buildings→`overture` nella GUI |
+| Overpass 406 / 403 / 429 / 504 / timeout | User-Agent identificativo + fallback sui mirror pubblici (il server più intasato provato per ultimo). 504 = i server pubblici sono sovraccarichi (peggio in fascia serale europea) — riprova tra poco. Al fallimento totale il build SI FERMA con un messaggio chiaro (nessun cambio di fonte silenzioso); per continuare comunque scegli Buildings→`overture` nella GUI, o passa `--allow-overture-fallback` / le sorgenti `overture` da CLI |
+| `HTTPFileSystem requires requests and aiohttp` | reinstalla l'extra gis: `pip install -e ".[dev,gis]" -c constraints.txt` (Overture legge i GeoParquet via HTTPS con fsspec, che richiede aiohttp+requests — ora dichiarati) |
 | `--imagery eox` non si connette | preferisci `--imagery s2`; oppure fornisci `--ortho` |
 | Training lento su CPU | abbassa `--budget`, tieni `image_width` a 128; oppure installa torch CUDA (`pip install torch --index-url https://download.pytorch.org/whl/cu124`) — auto-rilevato, nessuna modifica |
 | `export-blender` dice che Blender non c'è | installa Blender e rilancia, o copia il comando `blender --background …` stampato su una macchina che lo ha |
