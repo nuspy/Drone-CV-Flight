@@ -296,8 +296,7 @@ sulle soglie dell'ambiente.
 |---|---|
 | pip bloccato per ore in "backtracking" | manca `-c constraints.txt`, oppure Python non è 3.11/3.12 (ricrea il venv: `py -3.12 -m venv .venv`) |
 | `the desktop GUI requires PySide6` | installa l'extra gui: `pip install -e ".[dev,gis,gui]" -c constraints.txt` |
-| Overpass 406 / 403 / 429 | gestito automaticamente (User-Agent identificativo + fallback sui mirror pubblici); se falliscono TUTTI i mirror, passa Buildings a `overture` |
-| Overpass in timeout (proxy aziendale o cloud) | usa i provider Overture (GUI: Buildings→overture; script: `--source overture`) — S3 pubblico, niente rate limit |
+| Overpass 406 / 403 / 429 / 504 / timeout | gestito automaticamente: User-Agent identificativo, fallback sui mirror pubblici e — se durante un build falliscono TUTTI i mirror — fallback automatico a Overture (edifici + landcover + POI). Per saltare del tutto Overpass, scegli Buildings→`overture` nella GUI |
 | `--imagery eox` non si connette | preferisci `--imagery s2`; oppure fornisci `--ortho` |
 | Training lento su CPU | abbassa `--budget`, tieni `image_width` a 128; oppure installa torch CUDA (`pip install torch --index-url https://download.pytorch.org/whl/cu124`) — auto-rilevato, nessuna modifica |
 | `export-blender` dice che Blender non c'è | installa Blender e rilancia, o copia il comando `blender --background …` stampato su una macchina che lo ha |

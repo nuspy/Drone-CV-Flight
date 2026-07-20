@@ -49,6 +49,34 @@ class BuildSources:
     poi: object | None = None  # OverpassPoi (optional: POIs/landmarks/parts)
 
 
+def _fetch_buildings_resilient(sources: BuildSources, bbox: BBox, meta) -> list:
+    """Fetch buildings; if the source is Overpass and it fails entirely
+    (public mirrors flaky under load: 504 / read timeouts), fall back to
+    Overture Maps (public S3, no rate limits) for the whole OSM-sourced set —
+    buildings, landcover AND POIs — so a build that already downloaded the
+    DEM still completes. Mutates `sources` so the later landcover/POI fetches
+    use the same fallback provider."""
+    try:
+        return sources.buildings.fetch(bbox)
+    except Exception as e:  # noqa: BLE001
+        if not isinstance(sources.buildings, OverpassBuildings):
+            raise
+        log.warning(f"Overpass unavailable ({e}); falling back to Overture Maps for "
+                    "buildings + landcover + POIs")
+        from dronecv.gis.providers.overture import (
+            OvertureBuildingsProvider,
+            OvertureLandcoverProvider,
+            OverturePoiProvider,
+        )
+
+        sources.buildings = OvertureBuildingsProvider()
+        sources.landcover = OvertureLandcoverProvider()
+        sources.poi = OverturePoiProvider()
+        buildings = sources.buildings.fetch(bbox)
+        meta.stats["buildings_fallback"] = "overture"
+        return buildings
+
+
 def build_environment(
     bbox: BBox,
     env_name: str,
@@ -131,7 +159,7 @@ def build_environment(
     meta.ground_alt0 = float(ground_alt0 or 0.0)
 
     # ---- buildings: fetch, resolve heights (tags -> shadows -> defaults) ----
-    buildings = sources.buildings.fetch(bbox)
+    buildings = _fetch_buildings_resilient(sources, bbox, meta)
     ortho = sources.ortho
     if ortho is None and ortho_path is not None:
         from dronecv.gis.providers.imagery import load_geotiff_ortho

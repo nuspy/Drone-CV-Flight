@@ -22,17 +22,20 @@ HEADERS = {"User-Agent": "dronecv-gis/0.1 (+https://github.com/nuspy/Drone-CV-Fl
 RETRYABLE = {403, 406, 429, 502, 503, 504}
 
 
-def overpass_query(query: str, url: str | None = None, timeout_s: float = 240.0) -> dict:
+def overpass_query(query: str, url: str | None = None, timeout_s: float = 150.0) -> dict:
     """POST an Overpass QL query, walking the mirror list on failure.
     A caller-supplied non-default `url` is honored exclusively (tests,
-    private instances)."""
+    private instances). A separate short connect timeout means a dead mirror
+    is skipped in seconds, while a working-but-slow one still gets the full
+    read budget."""
     import httpx
 
+    timeout = httpx.Timeout(timeout_s, connect=15.0)
     urls = [url] if url and url not in MIRRORS else MIRRORS
     last: str = "no endpoint tried"
     for u in urls:
         try:
-            resp = httpx.post(u, data={"data": query}, headers=HEADERS, timeout=timeout_s)
+            resp = httpx.post(u, data={"data": query}, headers=HEADERS, timeout=timeout)
             if resp.status_code in RETRYABLE:
                 last = f"{u} -> HTTP {resp.status_code}"
                 log.warning(f"overpass endpoint rejected the request: {last}")
