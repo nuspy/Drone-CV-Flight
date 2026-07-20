@@ -1,0 +1,22 @@
+env:
+  name: budapest_test
+  kind: headless
+  seed: 0
+  anchor:
+    lat0: 47.5015
+    lon0: 19.0425
+    alt0: 121.88849639892578
+    true_north_offset_deg: 0.0
+world:
+  kind: gis
+  gis_dir: /home/user/Drone-CV-Flight/artifacts/gis/budapest_test
+sim:
+  image_width: 128
+  image_height: 128
+capture:
+  grid_spacing_m: 60.0
+  altitudes_agl_m:
+  - 50.0
+  - 90.0
+training:
+  backbone_width: 32

@@ -166,7 +166,6 @@ def localize_photos(photos_dir: Path, out_dir: Path) -> None:
     bundle = ModelBundle.load(cfg.bundle_dir)
     localizer = SingleShotLocalizer(bundle)
     world = _world()
-    anchor = _anchor()
     out_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for photo in sorted(photos_dir.glob("*.[jJpP]*[gG]")):
