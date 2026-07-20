@@ -307,6 +307,19 @@ def gis_export_blender(
         )
 
 
+@gis_app.command("view")
+def gis_view(
+    env: str = typer.Option(..., "--env", help="A built GIS environment"),
+    port: int = typer.Option(0, "--port", help="HTTP port (0 = pick a free one)"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't open a browser automatically"),
+) -> None:
+    """Open the realtime 3D viewer (three.js) for the built scene: sky + sun,
+    soft shadows, free-fly controls (mouse look, WASD, Q/E, wheel zoom)."""
+    from dronecv.commands.gis_cmd import run_gis_view
+
+    run_gis_view(env, port, no_browser)
+
+
 @gis_app.command("gui")
 def gis_gui() -> None:
     """Desktop GUI: search a place, draw the area mask, check coverage, build."""

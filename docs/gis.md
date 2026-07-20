@@ -215,6 +215,25 @@ hard/water weights), `trees.json` (instances with density+typology),
 - **Blender**: `blender --python blender_build_scene.py -- <export dir>`
   assembles terrain mesh, buildings and dupli-vert instanced forests.
 
+## Realtime 3D viewer
+
+```bash
+dronecv gis view --env siena      # builds scene.glb if needed, opens a browser
+```
+
+A self-contained three.js/WebGL viewer for `scene.glb`: PBR materials, a real
+sky with the sun placed at the scene's solar position (from
+`scene_meta.json`), soft shadows and ACES tone mapping. It is served over a
+local HTTP server (browsers block `file://` fetches of the model) and opened
+in your browser; `--port` fixes the port and `--no-browser` just serves it.
+Free-fly controls: **mouse drag** look, **click** to center the view on a
+point, **W/S/A/D** move, **Q/E** down/up, **G** toggles global vs
+view-relative movement, **wheel** zooms, **Tab** resets, **Shift** moves
+faster. The desktop GUI has an **Open 3D viewer** button that does the same,
+and every non-obvious control there carries a tooltip (what *budget* and
+*terrain resolution* mean, how to set them, and what raising or lowering them
+does).
+
 ## Limits (v1, stated)
 
 - Buildings are vertical extrusions (LoD1): no roof shapes, no overhangs.

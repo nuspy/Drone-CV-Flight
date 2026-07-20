@@ -124,6 +124,18 @@ EOF
 Look for: terracotta roofs vs light walls, flat dark water, green where
 parks are, landmark shapes where you expect them.
 
+Or, for a full realtime walk-through with sky, sun and shadows:
+
+```bash
+dronecv gis view --env budapest_hq
+```
+
+This builds `scene.glb` if needed and opens a browser viewer. Fly with the
+mouse (drag to look, click to center), **W/S/A/D** to move, **Q/E** for
+down/up, **G** to switch between global and view-relative movement, the wheel
+to zoom and **Tab** to reset. In the GUI the same thing is one click: **Open
+3D viewer**.
+
 ### A4. Export
 
 ```bash

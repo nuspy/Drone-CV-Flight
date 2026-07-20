@@ -124,6 +124,18 @@ EOF
 Verifica: tetti terracotta vs muri chiari, acqua scura e piatta, verde dove
 ci sono i parchi, sagome dei landmark dove te li aspetti.
 
+Oppure, per un giro realtime completo con cielo, sole e ombre:
+
+```bash
+dronecv gis view --env budapest_hq
+```
+
+Costruisce `scene.glb` se manca e apre il visualizzatore nel browser. Vola col
+mouse (trascina per orientarti, click per centrare), **W/S/A/D** per spostarti,
+**Q/E** giù/su, **G** per alternare movimento globale o relativo alla vista,
+rotella per lo zoom e **Tab** per resettare. Nella GUI basta un click: **Open
+3D viewer**.
+
 ### A4. Export
 
 ```bash

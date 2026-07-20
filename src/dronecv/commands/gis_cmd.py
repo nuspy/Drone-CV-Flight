@@ -98,6 +98,60 @@ def run_gis_cells(bbox_text: str, source: str, cell_m: float) -> None:
     )
 
 
+def serve_scene_dir(scene_dir: Path, port: int = 0) -> tuple:
+    """Start a background HTTP server rooted at `scene_dir` (the browser blocks
+    file:// fetches of scene.glb, so it must be served) and return
+    (httpd, url_of_viewer). Caller keeps the httpd to shut it down."""
+    import functools
+    import threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(scene_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    real_port = httpd.server_address[1]
+    return httpd, f"http://127.0.0.1:{real_port}/viewer.html"
+
+
+def prepare_scene_viewer(env: str, terrain_resolution: int = 513) -> Path:
+    """Ensure `<env>/scene_export/` holds scene.glb + viewer.html, building the
+    scene if needed. Returns the scene_export directory."""
+    from dronecv.config import load_config
+    from dronecv.gis.export.scene_export import export_scene
+    from dronecv.gis.export.viewer_html import write_viewer
+
+    cfg = load_config(env)
+    if cfg.world.kind != "gis" or not cfg.world.gis_dir:
+        raise SystemExit(f"'{env}' is not a GIS environment")
+    gis_dir = Path(cfg.world.gis_dir)
+    out_dir = gis_dir / "scene_export"
+    if not (out_dir / "scene.glb").exists():
+        export_scene(gis_dir, out_dir, terrain_resolution)
+    write_viewer(out_dir)
+    return out_dir
+
+
+def run_gis_view(env: str, port: int = 0, no_browser: bool = False) -> None:
+    """Serve the realtime 3D viewer for a built environment and open a browser.
+    Blocks until Ctrl+C."""
+    import webbrowser
+
+    out_dir = prepare_scene_viewer(env)
+    httpd, url = serve_scene_dir(out_dir, port)
+    console.print(f"[green]serving 3D viewer at[/green] [bold]{url}[/bold]  (Ctrl+C to stop)")
+    if not no_browser:
+        webbrowser.open(url)
+    try:
+        import time
+
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        console.print("\n[dim]viewer stopped[/dim]")
+    finally:
+        httpd.shutdown()
+
+
 def run_gis_info(bbox_text: str) -> None:
     from dronecv.gis.coverage import coverage_report
     from dronecv.gis.geometry import parse_bbox

@@ -305,17 +305,47 @@ def run_gui() -> None:  # pragma: no cover - requires a display
 
             cfg_form = QFormLayout()
             self.env_edit = QLineEdit(placeholderText="environment name, e.g. siena_centro")
+            self.env_edit.setToolTip(
+                "A short name (letters, digits, _ or -) for this environment. It "
+                "becomes the folder under artifacts/gis/<name> and the --env used "
+                "by every other command (train, run-all, view, export)."
+            )
             cfg_form.addRow("Env name", self.env_edit)
             self.res_spin = QDoubleSpinBox(minimum=0.5, maximum=10.0, value=1.0, singleStep=0.5)
+            self.res_spin.setToolTip(
+                "Ground sampling of the imagery/orthophoto mosaic, in METERS PER "
+                "PIXEL.\n\nLOWER value = finer detail, but the mosaic grows "
+                "quadratically (0.5 m/px has 4× the pixels — and RAM/disk — of "
+                "1 m/px) and the build is slower.\nHIGHER value = coarser texture "
+                "but fast and light.\n\n1 m is a good default; use 2–4 for large "
+                "areas. Building shapes come from vector data, so this mainly "
+                "affects the draped texture, not the geometry."
+            )
             cfg_form.addRow("Resolution m/px", self.res_spin)
             self.dem_combo = QComboBox()
             self.dem_combo.addItems(["copernicus_glo30"])
+            self.dem_combo.setToolTip(
+                "Elevation source for the terrain relief. Copernicus GLO-30 is a "
+                "free global 30 m digital elevation model (no account needed)."
+            )
             cfg_form.addRow("DEM", self.dem_combo)
             self.bld_combo = QComboBox()
             self.bld_combo.addItems(["osm_overpass", "overture"])
             self.bld_combo.currentTextChanged.connect(self.on_buildings_source)
+            self.bld_combo.setToolTip(
+                "Source of building footprints and heights.\n\n"
+                "• osm_overpass — OpenStreetMap via Overpass: best coverage in "
+                "Europe, height/levels tags where mapped.\n"
+                "• overture — Overture Maps: often better height coverage in the "
+                "US.\n\nThe coverage report above compares both for your area."
+            )
             cfg_form.addRow("Buildings", self.bld_combo)
             self.heights_label = QLabel("—")
+            self.heights_label.setToolTip(
+                "How building heights will be filled: real height/levels tags "
+                "first, then shadow inference (needs a timed orthophoto), then "
+                "neighbor-median, then per-class defaults."
+            )
             cfg_form.addRow("Heights", self.heights_label)
             self.imagery_combo = QComboBox()
             self.imagery_combo.addItems([
@@ -324,15 +354,43 @@ def run_gui() -> None:  # pragma: no cover - requires a display
                 "eox (Sentinel-2 mosaic, non-commercial)",
             ])
             self.imagery_combo.currentIndexChanged.connect(self._refresh_ready)
+            self.imagery_combo.setToolTip(
+                "Satellite imagery to drape as color (and, when reconstruction is "
+                "on, to detect extra buildings).\n\n"
+                "• none — synthetic class colors only (shape-first; lighting-"
+                "invariant).\n"
+                "• s2 — Sentinel-2 multi-date CLOUD-FREE composite (~10 m/px, "
+                "free, incl. commercial).\n"
+                "• eox — Sentinel-2 cloudless mosaic (non-commercial use).\n\n"
+                "Colors help texture-poor scenes; geometry still drives "
+                "localization."
+            )
             cfg_form.addRow("Imagery", self.imagery_combo)
             self.reconstruct_check = QCheckBox("reconstruct buildings from imagery")
             self.reconstruct_check.stateChanged.connect(self._refresh_ready)
+            self.reconstruct_check.setToolTip(
+                "Extract EXTRA building footprints from the imagery, but ONLY "
+                "where the vector data has none (GIS stays authoritative). Useful "
+                "for unmapped districts or new construction. Needs an imagery "
+                "source; quality tracks its resolution (10 m/px catches only "
+                "large structures)."
+            )
             cfg_form.addRow("", self.reconstruct_check)
             self.fallback_check = QCheckBox("if OSM/Overpass fails, use Overture automatically")
             self.fallback_check.stateChanged.connect(self._refresh_ready)
+            self.fallback_check.setToolTip(
+                "OFF by default so you stay in control of the data source. When "
+                "ON, a cell that OSM/Overpass can't deliver is silently retried "
+                "from Overture instead of asking you per cell."
+            )
             cfg_form.addRow("", self.fallback_check)
             self.palette_edit = QLineEdit(
                 placeholderText="folder of area photos for the color palette (optional)"
+            )
+            self.palette_edit.setToolTip(
+                "Optional: a folder of ground/aerial photos of the area. Their "
+                "dominant roof/wall colors are sampled to tint the synthetic "
+                "materials so the scene looks closer to the real place."
             )
             cfg_form.addRow("Palette photos", self.palette_edit)
             form.addLayout(cfg_form)
@@ -356,31 +414,99 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             act = QFormLayout()
             self.budget_spin = QDoubleSpinBox(minimum=200, maximum=100000, value=3000,
                                               singleStep=500, decimals=0)
+            self.budget_spin.setToolTip(
+                "BUDGET = the maximum number of TRAINING CAPTURES the active loop "
+                "may collect. A capture is one synthetic photo rendered from the "
+                "3D scene (a viewpoint) that the models learn to localize.\n\n"
+                "HIGHER budget = more viewpoints → better accuracy and robustness, "
+                "but longer training and more disk.\nLOWER budget = fast, but the "
+                "model may struggle in repetitive or large areas.\n\n"
+                "How to set it: ~3000 for a small city district; 6000–10000 for "
+                "large or visually repetitive areas. The loop stops early once "
+                "extra captures stop improving error, so the budget is a ceiling, "
+                "not a fixed cost."
+            )
             train_row = QHBoxLayout()
             self.train_btn = QPushButton("Train")
             self.train_btn.clicked.connect(self.on_train)
+            self.train_btn.setToolTip(
+                "Run the active training loop for this environment (capture → "
+                "train → measure → capture where error is high), up to Budget "
+                "captures. Progress prints to the console."
+            )
             self.eval_btn = QPushButton("Evaluate")
             self.eval_btn.clicked.connect(self.on_evaluate)
+            self.eval_btn.setToolTip(
+                "Evaluate the trained model on fresh probe captures and print the "
+                "localization error metrics."
+            )
             train_row.addWidget(self.train_btn)
             train_row.addWidget(self.eval_btn)
             act.addRow("Budget", self.budget_spin)
             act.addRow("Model", self._row_widget(train_row))
             self.episodes_spin = QDoubleSpinBox(minimum=1, maximum=100, value=12, decimals=0)
+            self.episodes_spin.setToolTip(
+                "How many autonomous test flights the reliability test runs. More "
+                "episodes = a more stable pass/fail verdict but a longer test."
+            )
             self.test_btn = QPushButton("Reliability test")
             self.test_btn.clicked.connect(self.on_reliability)
+            self.test_btn.setToolTip(
+                "Run the automated reliability test (localization accuracy + "
+                "autonomous target-reach) and report PASSED/FAILED with a report "
+                "link."
+            )
             act.addRow("Episodes", self.episodes_spin)
             act.addRow("", self.test_btn)
             self.photo_btn = QPushButton("Localize a photo…")
             self.photo_btn.clicked.connect(self.on_localize_photo)
+            self.photo_btn.setToolTip(
+                "Pick a real photo of the area and estimate its GPS coordinates, "
+                "heading and confidence against the trained model."
+            )
             act.addRow("", self.photo_btn)
             self.export_combo = QComboBox()
             self.export_combo.addItems(["glTF/GLB scene", "OBJ", "Blender .blend", "Unity assets"])
+            self.export_combo.setToolTip(
+                "3D export format:\n"
+                "• glTF/GLB scene — self-contained scene.glb (PBR, opens in the "
+                "3D viewer, Blender, Unity, any glTF tool).\n"
+                "• OBJ — buildings mesh only.\n"
+                "• Blender .blend — native .blend (runs Blender if installed).\n"
+                "• Unity assets — terrain.raw + splat + meshes for the Unity "
+                "importer."
+            )
             self.terrain_spin = QDoubleSpinBox(minimum=129, maximum=2049, value=513, decimals=0)
+            self.terrain_spin.setToolTip(
+                "TERRAIN RESOLUTION = the side length, in samples, of the square "
+                "heightmap grid that stores the terrain relief. It must be "
+                "2^n+1 (129, 257, 513, 1025, 2049) because Unity Terrain requires "
+                "it.\n\nHIGHER = finer relief and smoother slopes, but larger "
+                "files and slower import (2049×2049 ≈ 16× the samples of 513).\n"
+                "LOWER = coarser, lighter, faster.\n\n"
+                "How to set it: 513 is a good default; raise to 1025/2049 for "
+                "mountainous terrain where you want crisp ridgelines, lower to "
+                "257 for flat areas or to save memory. It does not affect "
+                "buildings, only the ground surface."
+            )
             self.export_btn = QPushButton("Export 3D")
             self.export_btn.clicked.connect(self.on_export)
+            self.export_btn.setToolTip(
+                "Write the selected 3D format under artifacts/gis/<env>/"
+                "scene_export/."
+            )
             act.addRow("Export", self.export_combo)
             act.addRow("Terrain res", self.terrain_spin)
             act.addRow("", self.export_btn)
+            self.viewer_btn = QPushButton("Open 3D viewer")
+            self.viewer_btn.clicked.connect(self.on_open_viewer)
+            self.viewer_btn.setToolTip(
+                "Open the realtime 3D viewer in your browser: sky + sun at the "
+                "scene's real solar position, soft shadows, and free-fly "
+                "controls (mouse look, WASD move, Q/E down/up, wheel zoom, Tab "
+                "reset). Builds the scene.glb first if it doesn't exist yet."
+            )
+            act.addRow("", self.viewer_btn)
             form.addLayout(act)
 
             # ---- map ----
@@ -470,6 +596,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
 
         def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
             self._save_session()
+            for httpd in getattr(self, "_viewer_servers", []):
+                httpd.shutdown()
             # Give running threads a moment; then detach hard so a long
             # network call or build cannot block the window from closing.
             for w in list(self._threads):
@@ -700,6 +828,39 @@ def run_gui() -> None:  # pragma: no cover - requires a display
                 return "see console for coordinates + Maps link"
 
             self._run_action("localize-photo", fn)
+
+        def on_open_viewer(self) -> None:
+            env = self.env_edit.text().strip()
+            if not env:
+                self.status.setText("set the Env name first")
+                return
+            res = int(self.terrain_spin.value())
+            self.status.setText("preparing 3D scene… (first time builds scene.glb)")
+
+            def fn():
+                from dronecv.commands.gis_cmd import prepare_scene_viewer
+
+                return str(prepare_scene_viewer(env, res))
+
+            worker = ActionWorker(fn, "3D viewer", parent=self)
+            self._register(worker)
+            worker.done.connect(self._open_viewer_ready)
+            worker.failed.connect(self.status.setText)
+            worker.start()
+
+        def _open_viewer_ready(self, msg: str) -> None:
+            # msg = "3D viewer: done. <scene_export dir>"
+            import webbrowser
+
+            from dronecv.commands.gis_cmd import serve_scene_dir
+
+            scene_dir = Path(msg.split("done.", 1)[1].strip())
+            if not hasattr(self, "_viewer_servers"):
+                self._viewer_servers = []
+            httpd, url = serve_scene_dir(scene_dir)
+            self._viewer_servers.append(httpd)  # keep alive for the session
+            webbrowser.open(url)
+            self.status.setText(f"3D viewer open at {url}")
 
         def on_export(self) -> None:
             env = self.env_edit.text().strip()
