@@ -19,22 +19,31 @@ import numpy as np
 
 from dronecv.gis.store import GisStore
 
-# class id -> RGB float. Ground classes 0-5, buildings 10-14.
+# class id -> RGB float. Ground classes 0-7, buildings 10-14. Buildings are
+# deliberately far from the ground tones (terracotta roofs / light stone):
+# when they share the ground palette, whole city districts render as bumps
+# and the place becomes unrecognizable.
 CLASS_COLORS = {
-    0: (0.42, 0.40, 0.33),  # bare ground
+    0: (0.52, 0.49, 0.42),  # bare ground / urban pavement
     1: (0.30, 0.44, 0.24),  # green
-    2: (0.16, 0.30, 0.50),  # water
-    3: (0.35, 0.35, 0.37),  # road
+    2: (0.10, 0.20, 0.34),  # water (dark, flat)
+    3: (0.22, 0.22, 0.24),  # road (dark asphalt)
     4: (0.30, 0.26, 0.24),  # rail
     5: (0.45, 0.44, 0.42),  # parking
     6: (0.20, 0.35, 0.16),  # broadleaf forest canopy
     7: (0.14, 0.28, 0.18),  # conifer forest canopy
-    10: (0.62, 0.55, 0.48),  # generic building
-    11: (0.66, 0.52, 0.42),  # residential
-    12: (0.55, 0.56, 0.60),  # industrial
-    13: (0.60, 0.58, 0.52),  # commercial
-    14: (0.72, 0.65, 0.55),  # landmark
+    10: (0.64, 0.42, 0.30),  # generic building (terracotta roof)
+    11: (0.68, 0.40, 0.27),  # residential (terracotta)
+    12: (0.56, 0.57, 0.62),  # industrial (grey sheet roof)
+    13: (0.58, 0.48, 0.38),  # commercial
+    14: (0.80, 0.73, 0.58),  # landmark (light stone)
 }
+
+# Per-class speckle amplitude: full texture on built/ground classes (feature
+# detectors need corners), nearly none on water/roads — real rivers and
+# asphalt are smooth, and full speckle there reads as blocky waves.
+CLASS_SPECKLE = {2: 0.015, 3: 0.05, 4: 0.06}
+DEFAULT_SPECKLE = 0.12
 
 
 class GisWorld:
@@ -52,6 +61,9 @@ class GisWorld:
         self._color_lut = np.zeros((32, 3), dtype=np.float32)
         for cid, rgb in CLASS_COLORS.items():
             self._color_lut[cid] = rgb
+        self._speckle_lut = np.full(32, DEFAULT_SPECKLE, dtype=np.float32)
+        for cid, amp in CLASS_SPECKLE.items():
+            self._speckle_lut[cid] = amp
         self.landmarks: list = []  # no analytic primitives: buildings live in the heightfield
 
     @classmethod
@@ -97,14 +109,27 @@ class GisWorld:
     def albedo_at(self, x: np.ndarray, z: np.ndarray) -> np.ndarray:
         r, c = self._rc(x, z)
         rn, cn = np.floor(r).astype(np.int64), np.floor(c).astype(np.int64)
+        cls = self.store.class_id[rn, cn]
         if self.store.albedo is not None:
             base = self.store.albedo[rn, cn].astype(np.float32) / 255.0
         else:
-            base = self._color_lut[self.store.class_id[rn, cn]]
+            base = self._color_lut[cls].copy()
+        # Building WALLS darker than roofs: a texel whose build_h differs
+        # sharply from a neighbor is a facade. Roof stays bright, the outline
+        # + facades go dark — silhouettes become readable at any sun angle.
+        bh = self.store.build_h
+        rn1 = np.minimum(rn + 1, self._h - 1)
+        cn1 = np.minimum(cn + 1, self._w - 1)
+        step = np.maximum(
+            np.abs(bh[rn, cn] - bh[rn1, cn]), np.abs(bh[rn, cn] - bh[rn, cn1])
+        )
+        wall = np.clip(step / 6.0, 0.0, 1.0)  # >=6 m jump -> full facade shade
+        base = base * (1.0 - 0.45 * wall)[..., None]
         # Deterministic per-texel speckle: gives feature detectors texture
         # without storing anything (hash of the integer texel coordinates).
         hashes = (rn * np.int64(73856093)) ^ (cn * np.int64(19349663))
-        noise = ((hashes & 0xFFFF).astype(np.float32) / 65535.0 - 0.5) * 0.12
+        noise = ((hashes & 0xFFFF).astype(np.float32) / 65535.0 - 0.5)
+        noise = noise * self._speckle_lut[cls]
         return np.clip(base + noise[..., None], 0.03, 0.97)
 
     # --------------------------------------------------------------- bounds

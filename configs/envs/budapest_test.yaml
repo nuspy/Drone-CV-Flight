@@ -5,7 +5,7 @@ env:
   anchor:
     lat0: 47.5015
     lon0: 19.0425
-    alt0: 121.88849639892578
+    alt0: 121.88771057128906
     true_north_offset_deg: 0.0
 world:
   kind: gis

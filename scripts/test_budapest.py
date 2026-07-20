@@ -90,7 +90,7 @@ def _anchor():
     return GeoAnchor.from_dict(GisStore.open(ROOT / "artifacts" / "gis" / ENV_NAME).meta.anchor)
 
 
-def _render(world, pos_enu, heading_deg, tilt_deg, w=512, h=384):
+def _render(world, pos_enu, heading_deg, tilt_deg, w=640, h=480):
     from datetime import UTC, datetime
 
     from dronecv.geo import celestial

@@ -133,6 +133,11 @@ def build_environment(
 
     landcover = sources.landcover.fetch(bbox)
     rasterize_landcover(store, anchor, landcover)
+    # Flatten water to a single level: the 30 m DSM is noisy over rivers and
+    # renders as blocky waves that visually drown the scene.
+    water = np.asarray(store.class_id) == 2
+    if water.any():
+        store.ground[water] = float(np.percentile(np.asarray(store.ground)[water], 10.0))
     b_stats = rasterize_buildings(store, anchor, buildings)
 
     # ---- POIs: landmark archetypes, building:part LoD, Commons photos ----

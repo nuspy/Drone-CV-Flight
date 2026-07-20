@@ -25,6 +25,44 @@ DEFAULT_CLASS_HEIGHTS = {
 }
 
 
+def resolve_missing_heights(anchor: GeoAnchor, buildings: list[Building],
+                            radius_m: float = 250.0) -> int:
+    """Untagged buildings inherit the MEDIAN height of tagged buildings within
+    ~radius_m. Fixed per-class defaults flatten dense city centers (a 6 m
+    default in a 22 m fabric makes whole districts unrecognizable); the local
+    median adapts: high downtown, low in suburbs. Returns how many were set."""
+    cells: dict[tuple[int, int], list[float]] = {}
+    cents: list[tuple[float, float] | None] = []
+    for b in buildings:
+        ring = ring_to_enu(anchor, b.footprint_lonlat)
+        if len(ring) < 3:
+            cents.append(None)
+            continue
+        arr = np.asarray(ring, dtype=np.float64)
+        ce, cn = float(arr[:, 0].mean()), float(arr[:, 1].mean())
+        cents.append((ce, cn))
+        if b.height_m is not None:
+            cells.setdefault((int(ce // radius_m), int(cn // radius_m)), []).append(
+                float(b.height_m)
+            )
+    n_set = 0
+    for b, cent in zip(buildings, cents, strict=True):
+        if b.height_m is not None or cent is None:
+            continue
+        ci, cj = int(cent[0] // radius_m), int(cent[1] // radius_m)
+        near = [
+            h
+            for di in (-1, 0, 1)
+            for dj in (-1, 0, 1)
+            for h in cells.get((ci + di, cj + dj), ())
+        ]
+        if len(near) >= 3:
+            b.height_m = float(np.median(near))
+            b.height_source = "neighbor_median"
+            n_set += 1
+    return n_set
+
+
 def _transform(store: GisStore) -> Affine:
     """Affine mapping (col, row) -> ENU (E, N). Row 0 is the SOUTH edge, so
     the N step is positive (unusual for images, fine for rasterio)."""
@@ -45,7 +83,9 @@ def building_polygon(anchor: GeoAnchor, b: Building) -> Polygon | None:
 
 def rasterize_buildings(store: GisStore, anchor: GeoAnchor, buildings: list[Building]) -> dict:
     """Burn building heights + classes into the store. Heights still missing
-    after the tag/shadow chain fall back to per-class defaults."""
+    after the tag/shadow chain get the local neighbor-median, then per-class
+    defaults as the last resort."""
+    n_neighbor = resolve_missing_heights(anchor, buildings)
     height_shapes = []
     class_shapes = []
     n_default = 0
@@ -62,7 +102,7 @@ def rasterize_buildings(store: GisStore, anchor: GeoAnchor, buildings: list[Buil
         height_shapes.append((poly, float(min(h, 400.0))))
         class_shapes.append((poly, BUILDING_CLASS_IDS.get(b.building_class, 10)))
     if not height_shapes:
-        return {"n_rasterized": 0, "n_class_default": 0}
+        return {"n_rasterized": 0, "n_class_default": 0, "n_neighbor_median": n_neighbor}
 
     shape = (store.meta.height, store.meta.width)
     transform = _transform(store)
@@ -76,8 +116,10 @@ def rasterize_buildings(store: GisStore, anchor: GeoAnchor, buildings: list[Buil
     store.build_h[:] = np.maximum(store.build_h, heights)
     mask = classes > 0
     store.class_id[mask] = classes[mask]
-    log.info(f"rasterized {len(height_shapes)} buildings ({n_default} class-default heights)")
-    return {"n_rasterized": len(height_shapes), "n_class_default": n_default}
+    log.info(f"rasterized {len(height_shapes)} buildings "
+             f"({n_neighbor} neighbor-median + {n_default} class-default heights)")
+    return {"n_rasterized": len(height_shapes), "n_class_default": n_default,
+            "n_neighbor_median": n_neighbor}
 
 
 def rasterize_landcover(store: GisStore, anchor: GeoAnchor, feats: list[LandcoverFeature]) -> int:
