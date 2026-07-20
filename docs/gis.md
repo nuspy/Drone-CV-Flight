@@ -122,7 +122,8 @@ with automatic hand-off at tile borders. Storage: mosaics are disk memmaps
 
 > The export pipeline is also a standalone product — see
 > [3d_product.md](3d_product.md) for the Unity/Blender/CAD profile, formats
-> and output licensing.
+> and output licensing, and [manual_en.md](manual_en.md) /
+> [manuale_it.md](manuale_it.md) for the step-by-step walkthrough.
 
 ## Scene export (Unity Terrain / Blender)
 

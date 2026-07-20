@@ -83,6 +83,9 @@ dronecv gis gui                                      # desktop GUI: map, mask dr
 ```
 
 See `docs/gis.md` for sources, licensing and the height-inference chain.
+**Step-by-step manuals** (3D export + aircraft recognition test, end to
+end): [docs/manual_en.md](docs/manual_en.md) · italiano:
+[docs/manuale_it.md](docs/manuale_it.md).
 
 ## Quick test with a photo (and the Android app)
 

@@ -1,5 +1,8 @@
 # Two products, one pipeline
 
+> Step-by-step walkthrough for both: [manual_en.md](manual_en.md) ·
+> italiano: [manuale_it.md](manuale_it.md).
+
 The repository serves two separately sellable purposes built on the same
 GIS→3D core:
 
