@@ -1,0 +1,55 @@
+{
+ "elements": [
+  {
+   "type": "node",
+   "id": 500,
+   "lat": 43.3229,
+   "lon": 11.3356,
+   "tags": {
+    "man_made": "tower",
+    "name": "Torre Alta",
+    "wikidata": "Q999999"
+   }
+  },
+  {
+   "type": "node",
+   "id": 501,
+   "lat": 43.3224,
+   "lon": 11.3262,
+   "tags": {
+    "historic": "castle",
+    "name": "Castello di Prova"
+   }
+  },
+  {
+   "type": "way",
+   "id": 502,
+   "tags": {
+    "building:part": "yes",
+    "height": "18"
+   },
+   "geometry": [
+    {
+     "lat": 43.3167,
+     "lon": 11.3322
+    },
+    {
+     "lat": 43.3167,
+     "lon": 11.332600000000001
+    },
+    {
+     "lat": 43.317099999999996,
+     "lon": 11.332600000000001
+    },
+    {
+     "lat": 43.317099999999996,
+     "lon": 11.3322
+    },
+    {
+     "lat": 43.3167,
+     "lon": 11.3322
+    }
+   ]
+  }
+ ]
+}

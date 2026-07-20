@@ -27,6 +27,8 @@ CLASS_COLORS = {
     3: (0.35, 0.35, 0.37),  # road
     4: (0.30, 0.26, 0.24),  # rail
     5: (0.45, 0.44, 0.42),  # parking
+    6: (0.20, 0.35, 0.16),  # broadleaf forest canopy
+    7: (0.14, 0.28, 0.18),  # conifer forest canopy
     10: (0.62, 0.55, 0.48),  # generic building
     11: (0.66, 0.52, 0.42),  # residential
     12: (0.55, 0.56, 0.60),  # industrial
@@ -79,8 +81,9 @@ class GisWorld:
             + g[r0 + 1, c0] * fr * (1 - fc)
             + g[r0 + 1, c0 + 1] * fr * fc
         )
-        rn, cn = np.round(r).astype(np.int64), np.round(c).astype(np.int64)
-        return (ground + self.store.build_h[rn, cn]).astype(np.float64)
+        rn, cn = np.floor(r).astype(np.int64), np.floor(c).astype(np.int64)
+        above = np.maximum(self.store.build_h[rn, cn], self.store.veg_h[rn, cn])
+        return (ground + above).astype(np.float64)
 
     def normal_at(self, x: np.ndarray, z: np.ndarray) -> np.ndarray:
         eps = max(self.res, 1.0)
@@ -93,7 +96,7 @@ class GisWorld:
 
     def albedo_at(self, x: np.ndarray, z: np.ndarray) -> np.ndarray:
         r, c = self._rc(x, z)
-        rn, cn = np.round(r).astype(np.int64), np.round(c).astype(np.int64)
+        rn, cn = np.floor(r).astype(np.int64), np.floor(c).astype(np.int64)
         if self.store.albedo is not None:
             base = self.store.albedo[rn, cn].astype(np.float32) / 255.0
         else:

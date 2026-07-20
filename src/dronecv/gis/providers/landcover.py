@@ -26,6 +26,8 @@ GROUND_CLASSES = {
     "road": 3,
     "rail": 4,
     "parking": 5,
+    "forest_broadleaf": 6,
+    "forest_conifer": 7,
 }
 
 
@@ -83,16 +85,29 @@ def parse_overpass_landcover(data: dict) -> list[LandcoverFeature]:
         tags = el.get("tags", {})
         pts = [(g["lon"], g["lat"]) for g in el["geometry"]]
         closed = len(pts) >= 4 and pts[0] == pts[-1]
+        bridge = tags.get("bridge") in ("yes", "viaduct") or tags.get("man_made") == "bridge"
         if "highway" in tags:
-            feats.append(LandcoverFeature("road", line_lonlat=pts, width_m=_road_width(tags)))
+            kind = "road"
+            feats.append(LandcoverFeature(kind, line_lonlat=pts, width_m=_road_width(tags)))
+            if bridge:
+                feats.append(LandcoverFeature("bridge", line_lonlat=pts, width_m=_road_width(tags) + 2.0))
         elif "railway" in tags:
             feats.append(LandcoverFeature("rail", line_lonlat=pts, width_m=5.0))
+            if bridge:
+                feats.append(LandcoverFeature("bridge", line_lonlat=pts, width_m=7.0))
         elif tags.get("natural") == "water" or tags.get("waterway") == "riverbank":
             if closed:
                 feats.append(LandcoverFeature("water", ring_lonlat=pts))
         elif tags.get("amenity") == "parking":
             if closed:
                 feats.append(LandcoverFeature("parking", ring_lonlat=pts))
+        elif closed and (
+            tags.get("landuse") == "forest" or tags.get("natural") in ("wood", "scrub")
+        ):
+            # Forest with typology: leaf_type drives the vegetation layer.
+            leaf = str(tags.get("leaf_type", "broadleaved"))
+            kind = "forest_conifer" if "needle" in leaf else "forest_broadleaf"
+            feats.append(LandcoverFeature(kind, ring_lonlat=pts))
         elif closed:
             feats.append(LandcoverFeature("green", ring_lonlat=pts))
     log.info(f"parsed {len(feats)} landcover features")

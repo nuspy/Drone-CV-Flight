@@ -70,6 +70,15 @@ class GisStore:
         self.class_id = np.lib.format.open_memmap(
             self.root / "class_id.npy", mode=mode, dtype=np.uint8, shape=shape
         )
+        # Vegetation canopy height above ground (0 = none). Solid in the
+        # heightfield: forests are visible geometry for the training renders.
+        veg_path = self.root / "veg_h.npy"
+        if mode != "r" or veg_path.exists():
+            self.veg_h = np.lib.format.open_memmap(
+                veg_path, mode=mode, dtype=np.float32, shape=shape
+            )
+        else:  # stores built before vegetation support
+            self.veg_h = np.zeros(shape, dtype=np.float32)
         albedo_path = self.root / "albedo.npy"
         self.albedo = (
             np.lib.format.open_memmap(albedo_path, mode="r")
@@ -94,7 +103,7 @@ class GisStore:
         (self.root / "meta.json").write_text(self.meta.to_json())
 
     def flush(self) -> None:
-        for arr in (self.ground, self.build_h, self.class_id):
+        for arr in (self.ground, self.build_h, self.class_id, self.veg_h):
             if hasattr(arr, "flush"):
                 arr.flush()
         self.save_meta()

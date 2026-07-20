@@ -91,6 +91,101 @@
      "lon": 11.333
     }
    ]
+  },
+  {
+   "type": "way",
+   "id": 404,
+   "tags": {
+    "landuse": "forest",
+    "leaf_type": "broadleaved"
+   },
+   "geometry": [
+    {
+     "lat": 43.321,
+     "lon": 11.3242
+    },
+    {
+     "lat": 43.321,
+     "lon": 11.3264
+    },
+    {
+     "lat": 43.324,
+     "lon": 11.3264
+    },
+    {
+     "lat": 43.324,
+     "lon": 11.3242
+    },
+    {
+     "lat": 43.321,
+     "lon": 11.3242
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 405,
+   "tags": {
+    "natural": "wood",
+    "leaf_type": "needleleaved"
+   },
+   "geometry": [
+    {
+     "lat": 43.3232,
+     "lon": 11.3315
+    },
+    {
+     "lat": 43.3232,
+     "lon": 11.3335
+    },
+    {
+     "lat": 43.325,
+     "lon": 11.3335
+    },
+    {
+     "lat": 43.325,
+     "lon": 11.3315
+    },
+    {
+     "lat": 43.3232,
+     "lon": 11.3315
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 406,
+   "tags": {
+    "highway": "secondary",
+    "bridge": "yes"
+   },
+   "geometry": [
+    {
+     "lat": 43.316,
+     "lon": 11.3242
+    },
+    {
+     "lat": 43.316,
+     "lon": 11.327
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 407,
+   "tags": {
+    "railway": "rail"
+   },
+   "geometry": [
+    {
+     "lat": 43.3148,
+     "lon": 11.324
+    },
+    {
+     "lat": 43.3145,
+     "lon": 11.336
+    }
+   ]
   }
  ]
 }

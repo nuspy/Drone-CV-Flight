@@ -119,9 +119,41 @@ def gen_landcover() -> None:
         _way(401, [(LON0, LAT0 - 0.005), (LON0, LAT0 + 0.005)], {"highway": "residential"}),
         _way(402, _rect(LON0 - 0.0058, LAT0 - 0.0048, 0.002, 0.0015), {"natural": "water"}),
         _way(403, _rect(LON0 + 0.003, LAT0 - 0.0018, 0.0025, 0.002), {"leisure": "park"}),
+        # Forests with typology (vegetation layer) + a bridge over the water.
+        _way(404, _rect(LON0 - 0.0058, LAT0 + 0.001, 0.0022, 0.003),
+             {"landuse": "forest", "leaf_type": "broadleaved"}),
+        _way(405, _rect(LON0 + 0.0015, LAT0 + 0.0032, 0.002, 0.0018),
+             {"natural": "wood", "leaf_type": "needleleaved"}),
+        _way(406, [(LON0 - 0.0058, LAT0 - 0.004), (LON0 - 0.003, LAT0 - 0.004)],
+             {"highway": "secondary", "bridge": "yes"}),
+        _way(407, [(LON0 - 0.006, LAT0 - 0.0052), (LON0 + 0.006, LAT0 - 0.0055)],
+             {"railway": "rail"}),
     ]
     (OUT / "overpass_landcover.json").write_text(json.dumps({"elements": elements}, indent=1))
     print(f"wrote overpass_landcover.json ({len(elements)} elements)")
+
+
+def gen_poi() -> None:
+
+    elements = [
+        # POI node on the tall tower (way 201 in the buildings fixture).
+        {
+            "type": "node", "id": 500,
+            "lat": LAT0 + 0.0029, "lon": LON0 + 0.0056,
+            "tags": {"man_made": "tower", "name": "Torre Alta", "wikidata": "Q999999"},
+        },
+        # Castle POI near the courtyard relation -> crenellated archetype.
+        {
+            "type": "node", "id": 501,
+            "lat": LAT0 + 0.0024, "lon": LON0 - 0.0038,
+            "tags": {"historic": "castle", "name": "Castello di Prova"},
+        },
+        # A building:part adding a taller wing on the industrial shed.
+        _way(502, _rect(LON0 + 0.0022, LAT0 - 0.0033, 0.0004, 0.0004),
+             {"building:part": "yes", "height": "18"}),
+    ]
+    (OUT / "overpass_poi.json").write_text(json.dumps({"elements": elements}, indent=1))
+    print(f"wrote overpass_poi.json ({len(elements)} elements)")
 
 
 if __name__ == "__main__":
@@ -129,3 +161,4 @@ if __name__ == "__main__":
     gen_dem()
     gen_buildings()
     gen_landcover()
+    gen_poi()

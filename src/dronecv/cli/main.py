@@ -192,6 +192,33 @@ def gis_info(bbox: str = typer.Option(..., "--bbox")) -> None:
     run_gis_info(bbox)
 
 
+@gis_app.command("export-scene")
+def gis_export_scene(
+    env: str = typer.Option(..., "--env", help="A built GIS environment"),
+    out: str = typer.Option(None, "--out", help="Output folder (default artifacts/gis/<env>/scene_export)"),
+    resolution: int = typer.Option(513, "--terrain-res", help="Unity Terrain heightmap resolution (2^n+1)"),
+) -> None:
+    """Export the environment as a Unity Terrain scene / Blender assets
+    (orography, splat classes, forests with density+typology, buildings)."""
+    from pathlib import Path
+
+    from dronecv.config import load_config
+    from dronecv.gis.export.scene_export import export_scene
+
+    cfg = load_config(env)
+    if cfg.world.kind != "gis" or not cfg.world.gis_dir:
+        console.print(f"[red]'{env}' is not a GIS environment[/red]")
+        raise SystemExit(2)
+    gis_dir = Path(cfg.world.gis_dir)
+    out_dir = Path(out) if out else gis_dir / "scene_export"
+    export_scene(gis_dir, out_dir, resolution)
+    console.print(
+        f"[green]scene exported to {out_dir}[/green]\n"
+        "Unity: menu [bold]DroneCV > Import GIS Scene…[/bold] and pick that folder.\n"
+        "Blender: [bold]blender --python blender_build_scene.py -- <folder>[/bold]"
+    )
+
+
 @gis_app.command("gui")
 def gis_gui() -> None:
     """Desktop GUI: search a place, draw the area mask, check coverage, build."""

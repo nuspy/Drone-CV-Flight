@@ -66,6 +66,52 @@ routes: coarse "which tile" → fine tile bundle (LRU-loaded) → precise fix,
 with automatic hand-off at tile borders. Storage: mosaics are disk memmaps
 (~13 GB at 1 m/px for 40×40 km — use `--res 2` to quarter it).
 
+## POIs, famous buildings and online photos
+
+`dronecv gis build` also queries OSM POIs (`historic`, `tourism`,
+`man_made=tower/...`) and `building:part` elements:
+
+- **Landmark archetypes**: a POI matched to its footprint reshapes the
+  building in the height mosaic — spires on towers, domes on churches,
+  crenellations on castles — so the TRAINING renders see the same
+  recognizable silhouette the exports reproduce. Real `building:part`
+  heights (where mapped) win over archetypes.
+- **Online photos**: with `fetch_photos` enabled, the primary Wikimedia
+  Commons image of each `wikidata`-tagged POI is downloaded to
+  `photos/` with attribution records (free licenses). Google Maps/Places
+  photos are deliberately NOT integrated: their ToS forbid offline storage
+  and texture use.
+
+## 3D territory features
+
+- **Forests**: OSM forest/wood polygons (typology from `leaf_type`) become a
+  noisy canopy height layer — visible geometry in the training renders and
+  individual tree instances (position, type, height) in the exports.
+  Density comes from per-texel deterministic gaps (~18% clearings).
+- **Bridges**: `bridge=yes` ways get a raised deck spanning the end-point
+  terrain heights; **railways** get a small embankment ridge; roads/rivers/
+  water/parking remain ground classes carved into the albedo/splat.
+- Mountains/orography come from the DEM as before.
+
+## Scene export (Unity Terrain / Blender)
+
+```bash
+dronecv gis export-scene --env siena          # -> artifacts/gis/siena/scene_export/
+```
+
+Produces `terrain.raw` (16-bit orography), `splatmap.png` (ground/vegetation/
+hard/water weights), `trees.json` (instances with density+typology),
+`buildings.obj` (extruded footprints + landmark meshes, Z-up ENU meters) and
+`scene_meta.json` (anchor, scales, attribution).
+
+- **Unity**: menu **DroneCV > Import GIS Scene…** (in the
+  com.dronecv.flight package) builds a Terrain with the real orography,
+  splat layers, TreeInstances by type/density, the building meshes with
+  colliders and a GeoAnchorAsset — ready for the SimLoop rig
+  (*GameObject > DroneCV > Create Sim Rig*) and `dronecv run-all`.
+- **Blender**: `blender --python blender_build_scene.py -- <export dir>`
+  assembles terrain mesh, buildings and dupli-vert instanced forests.
+
 ## Limits (v1, stated)
 
 - Buildings are vertical extrusions (LoD1): no roof shapes, no overhangs.

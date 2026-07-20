@@ -46,6 +46,7 @@ class BuildSources:
     buildings: OverpassBuildings
     landcover: OverpassLandcover
     ortho: OrthoImage | None = None
+    poi: object | None = None  # OverpassPoi (optional: POIs/landmarks/parts)
 
 
 def build_environment(
@@ -58,10 +59,15 @@ def build_environment(
     ortho_path: Path | None = None,
     ortho_utc: datetime | None = None,
     max_extent_m: float = 60_000.0,
+    fetch_photos: bool = False,
 ) -> Path:
-    sources = sources or BuildSources(
-        dem=CopernicusDem(), buildings=OverpassBuildings(), landcover=OverpassLandcover()
-    )
+    if sources is None:
+        from dronecv.gis.providers.poi import OverpassPoi
+
+        sources = BuildSources(
+            dem=CopernicusDem(), buildings=OverpassBuildings(), landcover=OverpassLandcover(),
+            poi=OverpassPoi(),
+        )
     anchor = anchor_for(bbox)
     e_min, n_min, e_max, n_max = enu_bounds(anchor, bbox)
     extent_e, extent_n = e_max - e_min, n_max - n_min
@@ -129,7 +135,35 @@ def build_environment(
     rasterize_landcover(store, anchor, landcover)
     b_stats = rasterize_buildings(store, anchor, buildings)
 
-    meta.max_height = float(max_ground + float(np.asarray(store.build_h).max(initial=0.0)))
+    # ---- POIs: landmark archetypes, building:part LoD, Commons photos ----
+    pois, parts, poi_stats = [], [], {}
+    if sources.poi is not None:
+        from dronecv.gis.landmarks import (
+            match_pois_to_buildings,
+            stamp_archetypes,
+            stamp_building_parts,
+        )
+
+        pois, parts = sources.poi.fetch(bbox)
+        n_parts = stamp_building_parts(store, anchor, parts)
+        pairs = match_pois_to_buildings(anchor, pois, buildings)
+        n_arch = stamp_archetypes(store, anchor, pairs)
+        poi_stats = {"n_pois": len(pois), "n_building_parts": n_parts, "n_archetypes": n_arch}
+        if fetch_photos:
+            from dronecv.gis.providers.poi import fetch_commons_photos
+
+            photos = fetch_commons_photos(pois, gis_dir / "photos")
+            poi_stats["n_photos"] = len(photos)
+
+    # ---- 3D territory features: forests, bridges, rail embankments ----
+    from dronecv.gis.vegetation import build_vegetation, stamp_bridges, stamp_rail_embankment
+
+    veg_stats = build_vegetation(store)
+    n_bridges = stamp_bridges(store, anchor, landcover)
+    n_rail = stamp_rail_embankment(store)
+
+    above = np.maximum(np.asarray(store.build_h), np.asarray(store.veg_h))
+    meta.max_height = float(max_ground + float(above.max(initial=0.0)))
     meta.stats = {
         "min_ground": min_ground,
         "max_ground": max_ground,
@@ -137,6 +171,10 @@ def build_environment(
         **height_stats(buildings),
         **b_stats,
         "n_landcover": len(landcover),
+        **poi_stats,
+        **veg_stats,
+        "n_bridges": n_bridges,
+        "n_rail_texels": n_rail,
     }
 
     # ---- saliency prior + orbit anchors ----
