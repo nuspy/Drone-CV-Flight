@@ -498,15 +498,28 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             act.addRow("Export", self.export_combo)
             act.addRow("Terrain res", self.terrain_spin)
             act.addRow("", self.export_btn)
+            viewer_row = QHBoxLayout()
             self.viewer_btn = QPushButton("Open 3D viewer")
             self.viewer_btn.clicked.connect(self.on_open_viewer)
             self.viewer_btn.setToolTip(
                 "Open the realtime 3D viewer in your browser: sky + sun at the "
                 "scene's real solar position, soft shadows, and free-fly "
                 "controls (mouse look, WASD move, Q/E down/up, wheel zoom, Tab "
-                "reset). Builds the scene.glb first if it doesn't exist yet."
+                "reset). Builds the scene.glb of the Env above first if it "
+                "doesn't exist yet. In the viewer, press O (or Open…) to load "
+                "any other .glb, and P (or Screenshot) to save a render."
             )
-            act.addRow("", self.viewer_btn)
+            self.open_file_btn = QPushButton("Open a .glb file…")
+            self.open_file_btn.clicked.connect(self.on_open_file_viewer)
+            self.open_file_btn.setToolTip(
+                "Open ANY .glb/.gltf file in the 3D viewer (not just this "
+                "environment's scene). Screenshots are saved next to it under "
+                "screenshots/<model name>/, with the camera coordinates and "
+                "height in each file name."
+            )
+            viewer_row.addWidget(self.viewer_btn)
+            viewer_row.addWidget(self.open_file_btn)
+            act.addRow("3D viewer", self._row_widget(viewer_row))
             form.addLayout(act)
 
             # ---- map ----
@@ -861,6 +874,27 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self._viewer_servers.append(httpd)  # keep alive for the session
             webbrowser.open(url)
             self.status.setText(f"3D viewer open at {url}")
+
+        def on_open_file_viewer(self) -> None:
+            """Open ANY .glb/.gltf in the viewer (not tied to a built env)."""
+            import webbrowser
+
+            from dronecv.commands.gis_cmd import serve_scene_dir
+            from dronecv.gis.export.viewer_html import write_viewer
+
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Open a 3D model", "", "3D models (*.glb *.gltf)"
+            )
+            if not path:
+                return
+            p = Path(path)
+            write_viewer(p.parent)  # viewer.html must sit next to the model
+            if not hasattr(self, "_viewer_servers"):
+                self._viewer_servers = []
+            httpd, url = serve_scene_dir(p.parent, model=p.name)
+            self._viewer_servers.append(httpd)
+            webbrowser.open(url)
+            self.status.setText(f"3D viewer open ({p.name}) at {url}")
 
         def on_export(self) -> None:
             env = self.env_edit.text().strip()

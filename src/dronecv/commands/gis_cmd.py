@@ -98,19 +98,71 @@ def run_gis_cells(bbox_text: str, source: str, cell_m: float) -> None:
     )
 
 
-def serve_scene_dir(scene_dir: Path, port: int = 0) -> tuple:
+def _viewer_handler_class():
+    """A SimpleHTTPRequestHandler that also accepts POST /screenshot: it saves
+    the PNG under `<served-dir>/screenshots/<model>/<filename>` so the browser
+    viewer can write screenshots directly to disk (filenames encode the camera
+    coordinates + height)."""
+    import base64
+    import json as _json
+    import re
+    from http.server import SimpleHTTPRequestHandler
+
+    def _safe(name: str, default: str) -> str:
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", name or "").strip("._") or default
+        return name
+
+    class ViewerHandler(SimpleHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 (http.server naming)
+            if self.path.rstrip("/") != "/screenshot":
+                self.send_error(404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                payload = _json.loads(self.rfile.read(length))
+                model = _safe(payload.get("model", ""), "model")
+                fname = _safe(payload.get("filename", ""), "shot.png")
+                if not fname.lower().endswith(".png"):
+                    fname += ".png"
+                data = payload["data"].split(",", 1)[-1]
+                png = base64.b64decode(data)
+            except Exception:  # noqa: BLE001
+                self.send_error(400, "bad screenshot payload")
+                return
+            out_dir = Path(self.directory) / "screenshots" / model
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / fname).write_bytes(png)
+            body = _json.dumps({"path": str(out_dir / fname)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # keep the console quiet
+            pass
+
+    return ViewerHandler
+
+
+def serve_scene_dir(scene_dir: Path, port: int = 0, model: str | None = None) -> tuple:
     """Start a background HTTP server rooted at `scene_dir` (the browser blocks
     file:// fetches of scene.glb, so it must be served) and return
-    (httpd, url_of_viewer). Caller keeps the httpd to shut it down."""
+    (httpd, url_of_viewer). `model` selects a specific file to open (default
+    scene.glb). Caller keeps the httpd to shut it down."""
     import functools
     import threading
-    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import ThreadingHTTPServer
+    from urllib.parse import quote
 
-    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(scene_dir))
+    handler = functools.partial(_viewer_handler_class(), directory=str(scene_dir))
     httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     real_port = httpd.server_address[1]
-    return httpd, f"http://127.0.0.1:{real_port}/viewer.html"
+    url = f"http://127.0.0.1:{real_port}/viewer.html"
+    if model:
+        url += f"?model={quote(model)}"
+    return httpd, url
 
 
 def prepare_scene_viewer(env: str, terrain_resolution: int = 513) -> Path:

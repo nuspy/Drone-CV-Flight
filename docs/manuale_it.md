@@ -133,8 +133,11 @@ dronecv gis view --env budapest_hq
 Costruisce `scene.glb` se manca e apre il visualizzatore nel browser. Vola col
 mouse (trascina per orientarti, click per centrare), **W/S/A/D** per spostarti,
 **Q/E** giù/su, **G** per alternare movimento globale o relativo alla vista,
-rotella per lo zoom e **Tab** per resettare. Nella GUI basta un click: **Open
-3D viewer**.
+rotella per lo zoom e **Tab** per resettare. Premi **O** per aprire un altro
+`.glb`, e **P** per uno screenshot — viene salvato in `screenshots/<nome-
+modello>/` con latitudine, longitudine e altezza della camera nel nome del
+file. Nella GUI basta un click: **Open 3D viewer** (questo env) e **Open a
+.glb file…** (qualsiasi file).
 
 ### A4. Export
 

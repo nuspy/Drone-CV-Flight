@@ -133,8 +133,10 @@ dronecv gis view --env budapest_hq
 This builds `scene.glb` if needed and opens a browser viewer. Fly with the
 mouse (drag to look, click to center), **W/S/A/D** to move, **Q/E** for
 down/up, **G** to switch between global and view-relative movement, the wheel
-to zoom and **Tab** to reset. In the GUI the same thing is one click: **Open
-3D viewer**.
+to zoom and **Tab** to reset. Press **O** to open any other `.glb`, and **P**
+to save a screenshot — it lands in `screenshots/<model-name>/` with the
+camera's lat/lon/height in the file name. In the GUI it is one click each:
+**Open 3D viewer** (this env) and **Open a .glb file…** (any file).
 
 ### A4. Export
 

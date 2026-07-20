@@ -11,10 +11,15 @@ shadows, ACES tone mapping, environment reflections. Free-fly controls:
     wheel          zoom in / out (dolly)
     Tab            reset view / zoom
     Shift          move faster
+    O              open another .glb/.gltf file
+    P              screenshot (saved server-side, filename = coords + height)
 
-The page loads `scene.glb` + `scene_meta.json` from its own directory, so it
-must be SERVED (browsers block file:// fetches) — `dronecv gis view` does
-that. It also accepts a drag-and-dropped .glb as a fallback.
+The page loads a model (default `scene.glb`, or `?model=<file>`) + the matching
+`scene_meta.json` from its own directory, so it must be SERVED (browsers block
+file:// fetches) — `dronecv gis view` does that. It also opens any local file
+via the Open button or drag-and-drop. Screenshots POST back to the server,
+which saves them under `screenshots/<model-name>/` with a filename that encodes
+the camera's latitude, longitude and height.
 """
 
 VIEWER_HTML = """<!doctype html>
@@ -25,25 +30,38 @@ VIEWER_HTML = """<!doctype html>
   html,body{height:100%;margin:0;background:#0b0e13;overflow:hidden;font:13px system-ui,sans-serif}
   #c{display:block;width:100%;height:100%}
   #hud{position:fixed;left:10px;top:10px;color:#dfe6ee;background:rgba(10,14,20,.62);
-       padding:10px 12px;border-radius:8px;line-height:1.5;pointer-events:none;max-width:320px}
+       padding:10px 12px;border-radius:8px;line-height:1.5;pointer-events:none;max-width:340px}
   #hud b{color:#7fd1ff}
   #mode{color:#ffd479}
+  #bar{position:fixed;right:10px;top:10px;display:flex;gap:8px}
+  #bar button{background:rgba(20,28,40,.9);color:#dfe6ee;border:1px solid #33465e;
+       border-radius:6px;padding:7px 11px;cursor:pointer;font:13px system-ui}
+  #bar button:hover{background:#26374d}
   #err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#ff8a8a;
        background:rgba(10,14,20,.9);padding:16px 20px;border-radius:8px;display:none}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);color:#dfe6ee;
+       background:rgba(20,28,40,.95);padding:9px 14px;border-radius:6px;display:none;max-width:80vw}
   #drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
         background:rgba(10,14,20,.7);color:#dfe6ee;font-size:18px}
 </style>
 </head><body>
 <canvas id="c"></canvas>
 <div id="hud">
-  <b>DroneCV scene</b><br/>
+  <b>DroneCV scene</b> &nbsp;<span id="model">scene.glb</span><br/>
   mouse drag: look &nbsp; click: center<br/>
   W/S/A/D move &nbsp; Q/E down/up<br/>
   wheel zoom &nbsp; Tab reset &nbsp; Shift faster<br/>
-  G: movement = <span id="mode">view-relative</span>
+  G: movement = <span id="mode">view-relative</span><br/>
+  <span id="pos">—</span>
 </div>
+<div id="bar">
+  <button id="openbtn" title="Open another .glb / .gltf file">Open…</button>
+  <button id="shotbtn" title="Screenshot (saved with coords + height in the name)">Screenshot</button>
+</div>
+<input id="file" type="file" accept=".glb,.gltf" style="display:none"/>
 <div id="err"></div>
-<div id="drop">drop a scene.glb here</div>
+<div id="toast"></div>
+<div id="drop">drop a .glb here</div>
 <script type="importmap">
 { "imports": {
   "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -56,8 +74,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+const params = new URLSearchParams(location.search);
+let MODEL = params.get('model') || 'scene.glb';
+function modelName() { return MODEL.replace(/\\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]/g, '_') || 'model'; }
+document.getElementById('model').textContent = MODEL;
+
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// preserveDrawingBuffer so screenshots capture the last rendered frame.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -99,6 +123,7 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // ---- load the model ----
 const loader = new GLTFLoader();
+let anchor = null;  // {lat0, lon0} from scene_meta.json, if present
 function frame(obj) {
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
@@ -112,6 +137,7 @@ function frame(obj) {
   const s = sunLight.shadow.camera; const e = Math.max(size.x, size.z) * 0.7;
   s.left = -e; s.right = e; s.top = e; s.bottom = -e; s.near = 1; s.far = 8000; s.updateProjectionMatrix();
   home.pos = camera.position.clone(); home.target = target.clone();
+  syncAngles();
 }
 function addModel(gltf) {
   if (window._model) scene.remove(window._model);
@@ -120,14 +146,22 @@ function addModel(gltf) {
   scene.add(m); frame(m);
 }
 function loadUrl(url) {
-  loader.load(url, addModel, undefined, e => showErr('could not load scene.glb — ' + e));
+  loader.load(url, addModel, undefined, e => showErr('could not load ' + MODEL + ' — ' + e));
 }
 function showErr(msg) { const d = document.getElementById('err'); d.textContent = msg; d.style.display = 'block'; }
+let toastTimer = 0;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', 3500);
+}
 
 fetch('scene_meta.json').then(r => r.ok ? r.json() : null).then(meta => {
-  if (meta && meta.sun_azimuth_deg != null) setSun(meta.sun_azimuth_deg, meta.sun_elevation_deg);
+  if (!meta) return;
+  if (meta.sun_azimuth_deg != null) setSun(meta.sun_azimuth_deg, meta.sun_elevation_deg);
+  if (meta.anchor && meta.anchor.lat0 != null) anchor = meta.anchor;
 }).catch(() => {});
-loadUrl('scene.glb');
+loadUrl(MODEL);
 
 // ---- free-fly controls ----
 const target = new THREE.Vector3();
@@ -161,8 +195,11 @@ canvas.addEventListener('wheel', e => {
   camera.position.addScaledVector(dir, -Math.sign(e.deltaY) * dist * 0.12);
 }, { passive: false });
 addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') return;
   if (e.code === 'Tab') { e.preventDefault(); camera.position.copy(home.pos); target.copy(home.target); syncAngles(); return; }
   if (e.code === 'KeyG') { globalMode = !globalMode; document.getElementById('mode').textContent = globalMode ? 'global' : 'view-relative'; return; }
+  if (e.code === 'KeyP') { e.preventDefault(); screenshot(); return; }
+  if (e.code === 'KeyO') { e.preventDefault(); document.getElementById('file').click(); return; }
   keys.add(e.code);
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -174,6 +211,63 @@ function centerOn(e) {
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
   const hit = window._model ? ray.intersectObject(window._model, true)[0] : null;
   if (hit) target.copy(hit.point);
+}
+
+// ---- camera position -> geo (east=+X, up=+Y, north=-Z in ENU meters) ----
+function camGeo() {
+  const east = camera.position.x, up = camera.position.y, north = -camera.position.z;
+  if (anchor) {
+    const lat = anchor.lat0 + north / 111320.0;
+    const lon = anchor.lon0 + east / (111320.0 * Math.cos(anchor.lat0 * Math.PI / 180.0));
+    return { lat, lon, h: up, east, north };
+  }
+  return { lat: null, lon: null, h: up, east, north };
+}
+function updatePos() {
+  const g = camGeo();
+  const el = document.getElementById('pos');
+  el.textContent = g.lat != null
+    ? `lat ${g.lat.toFixed(6)}  lon ${g.lon.toFixed(6)}  h ${g.h.toFixed(1)} m`
+    : `E ${g.east.toFixed(1)}  N ${g.north.toFixed(1)}  h ${g.h.toFixed(1)} m`;
+}
+
+// ---- screenshot: save server-side under screenshots/<model>/, name = coords ----
+function shotFilename() {
+  const g = camGeo();
+  const base = modelName();
+  const h = g.h.toFixed(1);
+  if (g.lat != null) {
+    return `${base}_lat${g.lat.toFixed(6)}_lon${g.lon.toFixed(6)}_h${h}m.png`;
+  }
+  return `${base}_e${g.east.toFixed(1)}_n${g.north.toFixed(1)}_h${h}m.png`;
+}
+function screenshot() {
+  renderer.render(scene, camera);  // ensure the buffer is current
+  const data = canvas.toDataURL('image/png');
+  const filename = shotFilename();
+  fetch('screenshot', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelName(), filename, data }),
+  }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(j => toast('saved ' + j.path))
+    .catch(() => {  // standalone / no server: fall back to a browser download
+      const a = document.createElement('a'); a.href = data; a.download = filename; a.click();
+      toast('downloaded ' + filename);
+    });
+}
+document.getElementById('shotbtn').addEventListener('click', screenshot);
+
+// ---- open another file (button + hidden input) ----
+document.getElementById('openbtn').addEventListener('click', () => document.getElementById('file').click());
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (f) openFile(f);
+});
+function openFile(f) {
+  MODEL = f.name; document.getElementById('model').textContent = MODEL;
+  document.getElementById('err').style.display = 'none';
+  const url = URL.createObjectURL(f);
+  loader.load(url, g => { addModel(g); toast('loaded ' + f.name); },
+              undefined, err => showErr('load failed: ' + err));
 }
 
 const clock = new THREE.Clock();
@@ -206,6 +300,7 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.1);
   moveStep(dt);
   camera.lookAt(camera.position.clone().add(viewDir()));
+  updatePos();
   resize(); renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -217,9 +312,7 @@ addEventListener('dragover', e => { e.preventDefault(); drop.style.display = 'fl
 addEventListener('dragleave', () => drop.style.display = 'none');
 addEventListener('drop', e => {
   e.preventDefault(); drop.style.display = 'none';
-  const f = e.dataTransfer.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f);
-  loader.load(url, addModel, undefined, err => showErr('load failed: ' + err));
+  const f = e.dataTransfer.files[0]; if (f) openFile(f);
 });
 </script>
 </body></html>"""

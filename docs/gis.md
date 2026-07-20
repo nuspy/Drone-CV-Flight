@@ -229,10 +229,23 @@ in your browser; `--port` fixes the port and `--no-browser` just serves it.
 Free-fly controls: **mouse drag** look, **click** to center the view on a
 point, **W/S/A/D** move, **Q/E** down/up, **G** toggles global vs
 view-relative movement, **wheel** zooms, **Tab** resets, **Shift** moves
-faster. The desktop GUI has an **Open 3D viewer** button that does the same,
-and every non-obvious control there carries a tooltip (what *budget* and
-*terrain resolution* mean, how to set them, and what raising or lowering them
-does).
+faster.
+
+- **Open any model**: press **O** (or the *Open…* button, or drag-and-drop) to
+  load a different `.glb`/`.gltf` — not just the built scene. The desktop GUI
+  also has an **Open a .glb file…** button for arbitrary files, alongside
+  **Open 3D viewer** for the current environment.
+- **Screenshot**: press **P** (or the *Screenshot* button) to capture the
+  render. It is saved server-side under
+  `<scene_export>/screenshots/<model-name>/`, and the **filename encodes the
+  camera's latitude, longitude and height** (e.g.
+  `scene_lat47.500000_lon19.040000_h150.0m.png`) — the live HUD shows the same
+  coordinates. Coordinates come from `scene_meta.json`'s anchor; for a model
+  with no meta the name falls back to ENU east/north. Standalone (no server),
+  it downloads instead.
+
+The GUI's non-obvious controls all carry tooltips (what *budget* and *terrain
+resolution* mean, how to set them, and what raising or lowering them does).
 
 ## Limits (v1, stated)
 
