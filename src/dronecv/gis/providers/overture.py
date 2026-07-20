@@ -224,13 +224,22 @@ class OvertureBuildingsProvider:
         for key, rgs in matches:
             url = f"{BUCKET}/{key}"
             log.info(f"reading {len(rgs)} row groups from {key.rsplit('/', 1)[-1]}")
-            table = index.read_rows(url, rgs, ["geometry", "height", "num_floors", "subtype", "class"], bbox)
+            cols = ["geometry", "height", "num_floors", "subtype", "class"]
+            try:
+                table = index.read_rows(url, rgs, cols + ["roof_shape", "roof_height"], bbox)
+                roof_shapes = table.column("roof_shape").to_pylist()
+                roof_heights = table.column("roof_height").to_pylist()
+            except Exception:  # noqa: BLE001 — schema without roof columns
+                table = index.read_rows(url, rgs, cols, bbox)
+                roof_shapes = [None] * table.num_rows
+                roof_heights = [None] * table.num_rows
             heights = table.column("height").to_pylist()
             floors = table.column("num_floors").to_pylist()
             subtypes = table.column("subtype").to_pylist()
             classes = table.column("class").to_pylist()
-            for wkb_val, h, fl, st, cl in zip(
-                table.column("geometry").to_pylist(), heights, floors, subtypes, classes, strict=True
+            for wkb_val, h, fl, st, cl, rs, rh in zip(
+                table.column("geometry").to_pylist(), heights, floors, subtypes, classes,
+                roof_shapes, roof_heights, strict=True,
             ):
                 for poly in _wkb_rings(wkb_val):
                     height, source = None, "none"
@@ -249,6 +258,8 @@ class OvertureBuildingsProvider:
                         height_m=height,
                         height_source=source,
                         building_class=cls,
+                        roof_shape=str(rs) if rs else None,
+                        roof_height_m=float(rh) if rh else None,
                     ))
         with_h = sum(1 for b in buildings if b.height_m is not None)
         log.info(f"overture buildings: {len(buildings)} in bbox ({with_h} with heights)")

@@ -56,6 +56,8 @@ class Building:
     height_source: str = "none"  # tag_height | tag_levels | shadow | class_default
     building_class: str = "generic"
     osm_id: int | None = None
+    roof_shape: str | None = None  # flat | gabled | hipped | pyramidal | skillion | dome
+    roof_height_m: float | None = None
 
 
 def _parse_height(tags: dict) -> tuple[float | None, str]:
@@ -116,12 +118,22 @@ def parse_overpass(data: dict) -> list[Building]:
             continue
         height, source = _parse_height(tags)
         cls = _building_class(tags)
+        roof_shape = tags.get("roof:shape")
+        roof_h = None
+        raw_rh = tags.get("roof:height") or tags.get("roof:levels")
+        if raw_rh:
+            try:
+                v = float(str(raw_rh).split()[0])
+                roof_h = v if "roof:height" in tags else v * 2.5
+            except ValueError:
+                pass
 
         if el.get("type") == "way" and "geometry" in el:
             ring = [(g["lon"], g["lat"]) for g in el["geometry"]]
             if len(ring) >= 4:
                 buildings.append(
-                    Building(ring, [], height, source, cls, el.get("id"))
+                    Building(ring, [], height, source, cls, el.get("id"),
+                             roof_shape=roof_shape, roof_height_m=roof_h)
                 )
         elif el.get("type") == "relation" and "members" in el:
             outers, inners = [], []

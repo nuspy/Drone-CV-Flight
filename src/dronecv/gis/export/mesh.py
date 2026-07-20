@@ -18,9 +18,15 @@ from shapely.geometry import Polygon
 class Mesh:
     vertices: list[tuple[float, float, float]] = field(default_factory=list)
     faces: list[tuple[int, int, int]] = field(default_factory=list)
+    # Optional per-vertex UVs (facade/roof texturing). When present, kept
+    # parallel to `vertices`; `add` pads with zeros if the source has none.
+    uvs: list[tuple[float, float]] = field(default_factory=list)
 
-    def add(self, verts, faces) -> None:
+    def add(self, verts, faces, uvs=None) -> None:
         off = len(self.vertices)
+        if self.uvs or uvs:
+            self.uvs.extend([(0.0, 0.0)] * (off - len(self.uvs)))
+            self.uvs.extend(uvs if uvs else [(0.0, 0.0)] * len(verts))
         self.vertices.extend(verts)
         self.faces.extend((a + off, b + off, c + off) for a, b, c in faces)
 
@@ -60,6 +66,127 @@ def extrude_polygon(poly: Polygon, base_z: float, top_z: float) -> Mesh:
             mesh.faces.append((a, b + n, a + n))
         start += ring_len
     return mesh
+
+
+def _rect_approx(poly: Polygon) -> tuple[np.ndarray, float, float, float]:
+    """Min-rotated-rect corners ordered [c0, c0+L, c0+L+W, c0+W] + (L, W, IoU)."""
+    rect = poly.minimum_rotated_rectangle
+    if rect.geom_type != "Polygon":
+        return np.zeros((4, 2)), 0.0, 0.0, 0.0
+    c = np.array(rect.exterior.coords[:-1], dtype=np.float64)
+    e01, e03 = c[1] - c[0], c[3] - c[0]
+    if np.linalg.norm(e01) < np.linalg.norm(e03):
+        c = c[[0, 3, 2, 1]]  # make edge 0->1 the LONG axis
+    ll = float(np.linalg.norm(c[1] - c[0]))
+    ww = float(np.linalg.norm(c[3] - c[0]))
+    iou = poly.intersection(rect).area / max(poly.union(rect).area, 1e-9)
+    return c, ll, ww, float(iou)
+
+
+UV_M = 3.0  # texture tile size in meters (one facade window / floor per tile)
+
+
+def _quad(mesh: Mesh, a, b, c, d) -> None:
+    """Quad a->b->c->d with automatic UVs: u along the a->b horizontal run,
+    v from the height of each corner (in UV_M tiles)."""
+    pts = [tuple(map(float, p)) for p in (a, b, c, d)]
+    u = float(np.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])) / UV_M
+    uvs = [(0.0, pts[0][2] / UV_M), (u, pts[1][2] / UV_M),
+           (u, pts[2][2] / UV_M), (0.0, pts[3][2] / UV_M)]
+    mesh.add(pts, [(0, 1, 2), (0, 2, 3)], uvs)
+
+
+def _tri(mesh: Mesh, a, b, c) -> None:
+    pts = [tuple(map(float, p)) for p in (a, b, c)]
+    u = float(np.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])) / UV_M
+    uvs = [(0.0, pts[0][2] / UV_M), (u, pts[1][2] / UV_M), (u / 2.0, pts[2][2] / UV_M)]
+    mesh.add(pts, [(0, 1, 2)], uvs)
+
+
+def building_meshes(
+    poly: Polygon,
+    base_z: float,
+    height_m: float,
+    roof_shape: str | None,
+    roof_height_m: float | None,
+    building_class: str = "generic",
+) -> tuple[Mesh, Mesh]:
+    """LoD2 building -> (walls, roof) meshes with real roof geometry.
+
+    Shaped roofs (gabled/hipped/pyramidal/skillion) are built on the
+    min-rotated-rect approximation when it fits the footprint (IoU>=0.80);
+    irregular or holed footprints fall back to a flat roof on the true
+    footprint. Untagged shapes get a heuristic: narrow residential ->
+    gabled, everything else flat."""
+    corners, ll, ww, iou = _rect_approx(poly)
+    shape = (roof_shape or "").lower()
+    if shape in ("", "no", "unknown", None):
+        shape = "gabled" if (
+            building_class in ("residential", "generic")
+            and ww < 20.0 and poly.area < 650.0 and not poly.interiors
+        ) else "flat"
+    if shape not in ("flat",) and (iou < 0.80 or poly.interiors or ww < 4.0):
+        shape = "flat"
+    roof_h = roof_height_m if roof_height_m else float(np.clip(0.30 * ww, 2.0, 7.0))
+    roof_h = min(roof_h, max(height_m - 2.0, 0.0)) if shape != "flat" else 0.0
+    top = base_z + height_m
+    wall_top = top - roof_h
+
+    walls, roof = Mesh(), Mesh()
+    if shape == "flat":
+        # True footprint: walls edge by edge (UV per facade), earcut roof cap.
+        rings = [list(poly.exterior.coords[:-1])] + [list(r.coords[:-1]) for r in poly.interiors]
+        for ring in rings:
+            for i in range(len(ring)):
+                a, b = ring[i], ring[(i + 1) % len(ring)]
+                _quad(walls, (a[0], a[1], base_z), (b[0], b[1], base_z),
+                      (b[0], b[1], top), (a[0], a[1], top))
+        verts2d, tris = _cap_triangulation(poly)
+        roof.add(
+            [(float(x), float(y), top) for x, y in verts2d],
+            [(int(a), int(b), int(c)) for a, b, c in tris],
+            [(float(x) / UV_M, float(y) / UV_M) for x, y in verts2d],
+        )
+        return walls, roof
+
+    z = lambda p, h: (p[0], p[1], h)  # noqa: E731
+    c0, c1, c2, c3 = corners
+    for a, b in ((c0, c1), (c1, c2), (c2, c3), (c3, c0)):
+        _quad(walls, z(a, base_z), z(b, base_z), z(b, wall_top), z(a, wall_top))
+    _quad(walls, z(c3, base_z), z(c2, base_z), z(c1, base_z), z(c0, base_z))  # bottom
+
+    if shape in ("gabled", "gable"):
+        ma, mb = (c0 + c3) / 2.0, (c1 + c2) / 2.0  # ridge under the long axis
+        _tri(walls, z(c0, wall_top), z(c3, wall_top), z(ma, top))
+        _tri(walls, z(c2, wall_top), z(c1, wall_top), z(mb, top))
+        _quad(roof, z(c0, wall_top), z(c1, wall_top), z(mb, top), z(ma, top))
+        _quad(roof, z(c2, wall_top), z(c3, wall_top), z(ma, top), z(mb, top))
+    elif shape in ("hipped", "hip", "half-hipped"):
+        axis = (c1 - c0) / max(ll, 1e-9)
+        inset = min(ww / 2.0, ll / 2.0 - 0.1)
+        ma = (c0 + c3) / 2.0 + axis * inset
+        mb = (c1 + c2) / 2.0 - axis * inset
+        _quad(roof, z(c0, wall_top), z(c1, wall_top), z(mb, top), z(ma, top))
+        _quad(roof, z(c2, wall_top), z(c3, wall_top), z(ma, top), z(mb, top))
+        _tri(roof, z(c3, wall_top), z(c0, wall_top), z(ma, top))
+        _tri(roof, z(c1, wall_top), z(c2, wall_top), z(mb, top))
+    elif shape in ("pyramidal", "pyramid"):
+        apex = corners.mean(axis=0)
+        for a, b in ((c0, c1), (c1, c2), (c2, c3), (c3, c0)):
+            _tri(roof, z(a, wall_top), z(b, wall_top), z(apex, top))
+    elif shape in ("skillion", "lean_to", "shed"):
+        # single slope rising along the short axis: edge c0-c1 low, c3-c2 high
+        _quad(roof, z(c0, wall_top), z(c1, wall_top), z(c2, top), z(c3, top))
+        _tri(walls, z(c1, wall_top), z(c2, wall_top), z(c2, top))
+        _tri(walls, z(c3, wall_top), z(c0, wall_top), z(c3, top))
+        _quad(walls, z(c3, wall_top), z(c2, wall_top), z(c2, top), z(c3, top))
+    elif shape in ("dome", "onion"):
+        d = dome((c0[0] + c2[0]) / 2.0, (c0[1] + c2[1]) / 2.0, wall_top,
+                 min(ll, ww) / 2.0)
+        roof.add(d.vertices, d.faces)
+    else:  # unrecognized tag -> flat cap on the rect
+        _quad(roof, z(c0, wall_top), z(c1, wall_top), z(c2, wall_top), z(c3, wall_top))
+    return walls, roof
 
 
 def spire(cx: float, cy: float, base_z: float, radius: float, height: float, segments: int = 12) -> Mesh:

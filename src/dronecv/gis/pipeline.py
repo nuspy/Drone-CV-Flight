@@ -185,6 +185,30 @@ def build_environment(
         store.ground[water] = float(np.percentile(np.asarray(store.ground)[water], 10.0))
     b_stats = rasterize_buildings(store, anchor, buildings)
 
+    # Persist the VECTOR footprints (heights now resolved): LoD2 scene export
+    # builds real prisms + shaped roofs from these instead of re-vectorizing
+    # the raster (which loses footprints and roof metadata).
+    from dronecv.gis.geometry import ring_to_enu
+
+    vec = []
+    for b in buildings:
+        ring = ring_to_enu(anchor, b.footprint_lonlat)
+        if len(ring) < 4:
+            continue
+        vec.append({
+            "ring_enu": [[round(e, 2), round(n, 2)] for e, n in ring],
+            "holes_enu": [[[round(e, 2), round(n, 2)] for e, n in ring_to_enu(anchor, h)]
+                          for h in b.holes_lonlat],
+            "height_m": b.height_m,
+            "class": b.building_class,
+            "height_source": b.height_source,
+            "roof_shape": b.roof_shape,
+            "roof_height_m": b.roof_height_m,
+        })
+    import json as _json
+
+    (gis_dir / "buildings.json").write_text(_json.dumps({"buildings": vec}))
+
     # ---- POIs: landmark archetypes, building:part LoD, Commons photos ----
     pois, parts, poi_stats = [], [], {}
     if sources.poi is not None:
