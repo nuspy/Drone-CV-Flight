@@ -1,0 +1,232 @@
+"""Overture Maps provider (GeoParquet on public S3, no keys).
+
+Alternative to Overpass when it is unreachable (e.g. filtered networks) or
+when better height coverage is wanted. Reads only what the AOI needs:
+S3 listing -> parquet footer scan (HTTP range requests) -> row groups whose
+bbox statistics intersect the query -> WKB decode.
+
+Data: Overture Maps Foundation (ODbL/CDLA-Permissive per theme).
+"""
+
+from __future__ import annotations
+
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import numpy as np
+
+from dronecv.gis.geometry import BBox
+from dronecv.gis.providers.buildings import CLASS_OF_TAG, Building
+from dronecv.gis.providers.landcover import LandcoverFeature
+from dronecv.util.logging import get_logger
+
+log = get_logger("dronecv.gis.overture")
+
+BUCKET = "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com"
+NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
+
+ROAD_WIDTHS = {"motorway": 16.0, "trunk": 14.0, "primary": 10.0, "secondary": 8.0,
+               "tertiary": 7.0, "residential": 6.0, "unknown": 5.0}
+
+
+def latest_release() -> str:
+    import httpx
+
+    resp = httpx.get(f"{BUCKET}/?list-type=2&prefix=release/&delimiter=/", timeout=30.0)
+    resp.raise_for_status()
+    prefixes = [
+        el.text for el in ET.fromstring(resp.text).iter(f"{NS}Prefix") if el.text != "release/"
+    ]
+    return sorted(prefixes)[-1].split("/")[1]
+
+
+def list_theme_files(release: str, theme: str, type_: str) -> list[str]:
+    import httpx
+
+    prefix = f"release/{release}/theme={theme}/type={type_}/"
+    keys, token = [], None
+    while True:
+        url = f"{BUCKET}/?list-type=2&prefix={prefix}"
+        if token:
+            import urllib.parse
+
+            url += "&continuation-token=" + urllib.parse.quote(token, safe="")
+        resp = httpx.get(url, timeout=60.0)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        keys += [el.text for el in root.iter(f"{NS}Key") if el.text.endswith(".parquet")]
+        token_el = root.find(f"{NS}NextContinuationToken")
+        if token_el is None:
+            break
+        token = token_el.text
+    return keys
+
+
+class _FooterIndex:
+    """Opens parquet footers over HTTP and yields row groups intersecting a bbox."""
+
+    def __init__(self):
+        import fsspec
+
+        self.fs = fsspec.filesystem("https")
+
+    def matching_row_groups(self, url: str, bbox: BBox) -> list[int]:
+        import pyarrow.parquet as pq
+
+        try:
+            with self.fs.open(url, "rb", block_size=256 * 1024) as fh:
+                pf = pq.ParquetFile(fh)
+                idx = {c.path_in_schema: j for j, c in enumerate(pf.metadata.row_group(0).to_dict()["columns"])}
+                want = []
+                for rg in range(pf.metadata.num_row_groups):
+                    meta = pf.metadata.row_group(rg)
+                    xmin = meta.column(idx["bbox.xmin"]).statistics
+                    ymin = meta.column(idx["bbox.ymin"]).statistics
+                    xmax = meta.column(idx["bbox.xmax"]).statistics
+                    ymax = meta.column(idx["bbox.ymax"]).statistics
+                    if None in (xmin, ymin, xmax, ymax):
+                        want.append(rg)
+                        continue
+                    if (xmax.max >= bbox.west and xmin.min <= bbox.east
+                            and ymax.max >= bbox.south and ymin.min <= bbox.north):
+                        want.append(rg)
+                return want
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"footer scan failed for {url.rsplit('/', 1)[-1]}: {e}")
+            return []
+
+    def read_rows(self, url: str, row_groups: list[int], columns: list[str], bbox: BBox):
+        import pyarrow.parquet as pq
+
+        with self.fs.open(url, "rb", block_size=4 * 1024 * 1024) as fh:
+            pf = pq.ParquetFile(fh)
+            table = pf.read_row_groups(row_groups, columns=columns + ["bbox"])
+        b = table.column("bbox").flatten()
+        names = table.column("bbox").type
+        cols = {names.field(i).name: b[i] for i in range(names.num_fields)}
+        keep = (
+            (np.asarray(cols["xmax"]) >= bbox.west) & (np.asarray(cols["xmin"]) <= bbox.east)
+            & (np.asarray(cols["ymax"]) >= bbox.south) & (np.asarray(cols["ymin"]) <= bbox.north)
+        )
+        return table.filter(keep)
+
+
+def _wkb_rings(geom_wkb: bytes):
+    from shapely import wkb as swkb
+
+    geom = swkb.loads(geom_wkb)
+    if geom.geom_type == "Polygon":
+        polys = [geom]
+    elif geom.geom_type == "MultiPolygon":
+        polys = list(geom.geoms)
+    else:
+        return []
+    return polys
+
+
+def scan_files_parallel(index: _FooterIndex, keys: list[str], bbox: BBox, workers: int = 16):
+    """Footer-scan many parquet files concurrently; returns [(key, row_groups)]."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def probe(key: str):
+        return key, index.matching_row_groups(f"{BUCKET}/{key}", bbox)
+
+    matches = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for key, rgs in pool.map(probe, keys):
+            if rgs:
+                matches.append((key, rgs))
+    log.info(f"{len(matches)} file(s) intersect the bbox")
+    return matches
+
+
+class OvertureBuildingsProvider:
+    """`.fetch(bbox) -> list[Building]` — drop-in for OverpassBuildings."""
+
+    def __init__(self, release: str | None = None, cache_dir: Path | None = None):
+        self.release = release
+        self._files: list[str] | None = None
+
+    def fetch(self, bbox: BBox) -> list[Building]:
+        release = self.release or latest_release()
+        files = list_theme_files(release, "buildings", "building")
+        log.info(f"overture {release}: scanning {len(files)} building files for {bbox}")
+        index = _FooterIndex()
+        matches = scan_files_parallel(index, files, bbox)
+        buildings: list[Building] = []
+        for key, rgs in matches:
+            url = f"{BUCKET}/{key}"
+            log.info(f"reading {len(rgs)} row groups from {key.rsplit('/', 1)[-1]}")
+            table = index.read_rows(url, rgs, ["geometry", "height", "num_floors", "subtype", "class"], bbox)
+            heights = table.column("height").to_pylist()
+            floors = table.column("num_floors").to_pylist()
+            subtypes = table.column("subtype").to_pylist()
+            classes = table.column("class").to_pylist()
+            for wkb_val, h, fl, st, cl in zip(
+                table.column("geometry").to_pylist(), heights, floors, subtypes, classes, strict=True
+            ):
+                for poly in _wkb_rings(wkb_val):
+                    height, source = None, "none"
+                    if h is not None and h > 0:
+                        height, source = float(h), "tag_height"
+                    elif fl:
+                        height, source = float(fl) * 3.0, "tag_levels"
+                    cls = CLASS_OF_TAG.get(str(cl or st or "").lower(), None)
+                    if cls is None:
+                        cls = {"residential": "residential", "industrial": "industrial",
+                               "commercial": "commercial", "religious": "landmark",
+                               "civic": "commercial", "outbuilding": "generic"}.get(str(st or "").lower(), "generic")
+                    buildings.append(Building(
+                        footprint_lonlat=list(poly.exterior.coords),
+                        holes_lonlat=[list(r.coords) for r in poly.interiors],
+                        height_m=height,
+                        height_source=source,
+                        building_class=cls,
+                    ))
+        with_h = sum(1 for b in buildings if b.height_m is not None)
+        log.info(f"overture buildings: {len(buildings)} in bbox ({with_h} with heights)")
+        return buildings
+
+
+class OvertureLandcoverProvider:
+    """Water polygons + road segments from Overture -> LandcoverFeatures."""
+
+    def __init__(self, release: str | None = None):
+        self.release = release
+
+    def fetch(self, bbox: BBox) -> list[LandcoverFeature]:
+        release = self.release or latest_release()
+        index = _FooterIndex()
+        feats: list[LandcoverFeature] = []
+
+        for key, rgs in scan_files_parallel(index, list_theme_files(release, "base", "water"), bbox):
+            url = f"{BUCKET}/{key}"
+            table = index.read_rows(url, rgs, ["geometry"], bbox)
+            for wkb_val in table.column("geometry").to_pylist():
+                for poly in _wkb_rings(wkb_val):
+                    feats.append(LandcoverFeature("water", ring_lonlat=list(poly.exterior.coords)))
+
+        for key, rgs in scan_files_parallel(
+            index, list_theme_files(release, "transportation", "segment"), bbox
+        ):
+            url = f"{BUCKET}/{key}"
+            table = index.read_rows(url, rgs, ["geometry", "subtype", "class"], bbox)
+            from shapely import wkb as swkb
+
+            for wkb_val, st, cl in zip(
+                table.column("geometry").to_pylist(),
+                table.column("subtype").to_pylist(),
+                table.column("class").to_pylist(),
+                strict=True,
+            ):
+                if str(st) != "road":
+                    continue
+                geom = swkb.loads(wkb_val)
+                lines = [geom] if geom.geom_type == "LineString" else (
+                    list(geom.geoms) if geom.geom_type == "MultiLineString" else []
+                )
+                width = ROAD_WIDTHS.get(str(cl or "unknown").lower(), 5.0)
+                for line in lines:
+                    feats.append(LandcoverFeature("road", line_lonlat=list(line.coords), width_m=width))
+        log.info(f"overture landcover: {len(feats)} features")
+        return feats
