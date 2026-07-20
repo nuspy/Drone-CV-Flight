@@ -49,6 +49,25 @@ from Overpass.
    tagged buildings within ~250 m (a fixed default flattens dense centers);
 5. per-class defaults (residential 7 m, industrial 9 m, landmark 25 m, …).
 
+## Clouds: detection + multi-date cloud-free compositing (`--imagery s2`)
+
+Satellite photos are frequently obstructed by clouds. Two mechanisms:
+
+1. **Any imagery source** gets a cloud/shadow mask automatically (bright +
+   desaturated blobs, plus paired dark shadows within plausible reach) —
+   masked texels are excluded from footprint extraction, palette and
+   vegetation, and the build warns when obstruction exceeds 2%.
+2. **`--imagery s2`** navigates the DATES: Sentinel-2 L2A publishes every
+   acquisition (~5 days) as public COGs; the provider lists recent scenes
+   for the AOI's MGRS tile, reads only the AOI window of each, detects
+   clouds per scene, and fills the holes of the best scene from other dates
+   (radiometrically aligned before filling) until coverage is complete — a
+   process that may take several photos, all automatic. The composite mixes
+   dates, so it deliberately carries no acquisition time (shadow-based
+   height inference is skipped on it). Scene usage is recorded in
+   `meta.json` (`cloudfree_composite`). Attribution: "contains modified
+   Copernicus Sentinel data" (free, incl. commercial use).
+
 ## Composite mosaics: automatic radiometric normalization
 
 Satellite orthophotos are usually composites of strips acquired on different

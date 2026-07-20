@@ -39,6 +39,9 @@ class OrthoImage:
     # Optional color channels (HxWx3 float [0,1], same grid as `gray`) —
     # used by palette extraction (roof colors) and vegetation green-spots.
     rgb: np.ndarray | None = None
+    # Optional validity mask (True = usable). Set by the cloud detector:
+    # consumers (footprints, palette, vegetation) skip invalid texels.
+    valid: np.ndarray | None = None
 
     def sample(self, e: np.ndarray, n: np.ndarray) -> np.ndarray:
         r = np.clip((np.asarray(n) - self.n0) / self.res_m, 0, self.gray.shape[0] - 1)

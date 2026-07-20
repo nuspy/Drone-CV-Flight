@@ -214,6 +214,8 @@ def building_mask(
     # would drop every roof in the darker strip. MAD ~ boxFilter of |dev|.
     mad = cv2.boxFilter(np.abs(blur - ref), -1, (win, win))
     cand = blur > ref + np.maximum(0.06, 2.5 * mad)
+    if ortho.valid is not None:  # never extract "buildings" out of clouds
+        cand &= ortho.valid
 
     k = max(3, int(3.0 / ortho.res_m) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))

@@ -60,6 +60,8 @@ def vegetation_from_imagery(store: GisStore, ortho) -> dict:
             rgb = ortho.rgb[pr[:, None], pc[None, :]]
             r_, g_, b_ = rgb[..., 0], rgb[..., 1], rgb[..., 2]
             green = (g_ > r_ + 0.03) & (g_ > b_ + 0.02) & (g_ > 0.10)
+            if ortho.valid is not None:  # cloud/shadow texels are unusable
+                green &= ortho.valid[pr[:, None], pc[None, :]]
             cls = np.asarray(store.class_id[r0:r1, c0:c1])
             paintable = green & (cls == 0)  # never overwrite water/roads/buildings
             density = cv2.boxFilter(

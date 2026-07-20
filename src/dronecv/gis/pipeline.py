@@ -148,6 +148,17 @@ def build_environment(
             meta.attribution.append(
                 "Sentinel-2 cloudless by EOX IT Services (CC BY-NC-SA 4.0), non-commercial"
             )
+        elif imagery == "s2":
+            from dronecv.gis.providers.sentinel2 import fetch_cloudfree_ortho
+
+            ortho, s2_stats = fetch_cloudfree_ortho(bbox, anchor, res_m=max(imagery_res_m, 10.0))
+            meta.stats["cloudfree_composite"] = {
+                "n_scenes_used": s2_stats.n_scenes_used,
+                "first_scene_cloud_fraction": round(s2_stats.first_scene_cloud_fraction, 4),
+                "final_hole_fraction": round(s2_stats.final_hole_fraction, 4),
+                "fills": s2_stats.fills,
+            }
+            meta.attribution.append("Contains modified Copernicus Sentinel data")
         elif imagery.startswith("xyz:"):
             zoom = max(12, min(19, int(round(math.log2(156543.03 / 256.0 / max(imagery_res_m, 0.05))))))
             ortho = fetch_xyz_ortho(bbox, anchor, imagery[4:], zoom=zoom)
@@ -161,6 +172,23 @@ def build_environment(
         from dronecv.gis.radiometry import normalize_zones
 
         ortho, rad_stats = normalize_zones(ortho)
+
+    # Single-date imagery may contain clouds: mask them so no consumer
+    # mistakes a cloud for a roof or its shadow for water. (The "s2" source
+    # arrives already cloud-free by multi-date compositing.)
+    if ortho is not None and imagery != "s2":
+        from dronecv.gis.clouds import cloud_mask
+
+        inv = cloud_mask(ortho)
+        if inv.any():
+            ortho.valid = ~inv
+            frac = float(inv.mean())
+            meta.stats["cloud_fraction"] = round(frac, 4)
+            if frac > 0.02:
+                log.warning(
+                    f"imagery is {frac:.0%} cloud-obstructed — those texels are "
+                    "excluded; consider --imagery s2 (multi-date cloud-free composite)"
+                )
 
     n_reconstructed = 0
     if reconstruct_buildings:
@@ -288,6 +316,8 @@ def build_environment(
             pr = np.clip(((gn - ortho.n0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[0] - 1)
             pc = np.clip(((ge - ortho.e0) / ortho.res_m).astype(int), 0, ortho.rgb.shape[1] - 1)
             roof_pixels = ortho.rgb[pr, pc]
+            if ortho.valid is not None:  # cloud texels are not roof colors
+                roof_pixels = roof_pixels[ortho.valid[pr, pc]]
     palette = extract_palette(photo_dirs, roof_pixels=roof_pixels)
     palette.save(gis_dir)
     meta.stats["palette"] = {"n_roof_px": palette.n_roof_px, "n_wall_px": palette.n_wall_px,

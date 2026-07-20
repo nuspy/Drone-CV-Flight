@@ -183,7 +183,8 @@ def gis_build(
     ),
     imagery: str = typer.Option(
         None, "--imagery",
-        help="Imagery source when no --ortho: 'eox' (Sentinel-2 ~10 m) or "
+        help="Imagery source when no --ortho: 's2' (Sentinel-2 multi-date "
+        "CLOUD-FREE composite, ~10 m), 'eox' (Sentinel-2 cloudless mosaic) or "
         "'xyz:<url-template>' (you own the provider ToS)",
     ),
     imagery_res: float = typer.Option(10.0, "--imagery-res", help="Imagery resolution m/px"),
