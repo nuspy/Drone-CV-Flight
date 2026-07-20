@@ -95,7 +95,6 @@ class OverpassBuildings:
     def _raw(self, bbox: BBox) -> dict:
         if self.fixture_path is not None:
             return json.loads(Path(self.fixture_path).read_text())
-        import httpx
 
         query = (
             f"[out:json][timeout:180];"
@@ -104,9 +103,9 @@ class OverpassBuildings:
             f"out body geom;"
         )
         log.info(f"querying Overpass for buildings in {bbox}")
-        resp = httpx.post(self.url, data={"data": query}, timeout=240.0)
-        resp.raise_for_status()
-        return resp.json()
+        from dronecv.gis.providers.overpass_http import overpass_query
+
+        return overpass_query(query, url=self.url)
 
 
 def parse_overpass(data: dict) -> list[Building]:

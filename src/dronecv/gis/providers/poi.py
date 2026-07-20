@@ -69,7 +69,6 @@ class OverpassPoi:
     def _raw(self, bbox: BBox) -> dict:
         if self.fixture_path is not None:
             return json.loads(Path(self.fixture_path).read_text())
-        import httpx
 
         b = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
         query = (
@@ -80,9 +79,9 @@ class OverpassPoi:
             f");out body geom center;"
         )
         log.info(f"querying Overpass for POI/parts in {bbox}")
-        resp = httpx.post(self.url, data={"data": query}, timeout=240.0)
-        resp.raise_for_status()
-        return resp.json()
+        from dronecv.gis.providers.overpass_http import overpass_query
+
+        return overpass_query(query, url=self.url)
 
 
 def _archetype(tags: dict) -> str | None:

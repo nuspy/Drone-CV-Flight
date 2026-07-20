@@ -59,7 +59,6 @@ class OverpassLandcover:
     def _raw(self, bbox: BBox) -> dict:
         if self.fixture_path is not None:
             return json.loads(Path(self.fixture_path).read_text())
-        import httpx
 
         b = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
         query = (
@@ -72,9 +71,9 @@ class OverpassLandcover:
             f");out body geom;"
         )
         log.info(f"querying Overpass for landcover in {bbox}")
-        resp = httpx.post(self.url, data={"data": query}, timeout=240.0)
-        resp.raise_for_status()
-        return resp.json()
+        from dronecv.gis.providers.overpass_http import overpass_query
+
+        return overpass_query(query, url=self.url)
 
 
 def parse_overpass_landcover(data: dict) -> list[LandcoverFeature]:
