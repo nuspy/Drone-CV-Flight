@@ -13,6 +13,7 @@ using System.IO;
 using DroneCV.Flight.Geo;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace DroneCV.Flight.Editor
@@ -24,6 +25,17 @@ namespace DroneCV.Flight.Editor
         {
             var dir = EditorUtility.OpenFolderPanel("Select dronecv GIS export folder", "", "");
             if (string.IsNullOrEmpty(dir)) return;
+            ImportFolder(dir, intoNewScene: false);
+        }
+
+        /// Import a dronecv GIS export folder into Unity. When `intoNewScene` is
+        /// true a fresh empty scene is created first; otherwise the objects are
+        /// added to the currently open scene (the product default). Reused by
+        /// the GIS Environment Builder window — no logic is duplicated.
+        public static void ImportFolder(string dir, bool intoNewScene)
+        {
+            if (intoNewScene)
+                EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var meta = JObject.Parse(File.ReadAllText(Path.Combine(dir, "scene_meta.json")));
 
             int res = (int)meta["terrain_resolution"];

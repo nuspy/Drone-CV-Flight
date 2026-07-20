@@ -49,6 +49,12 @@ What makes the output look right:
 - Unity Terrain assets — `terrain.raw` + `splatmap.png` + `trees.json` via
   the *DroneCV > Import GIS Scene* editor menu (heightmap terrain with
   splat layers; buildings from scene.glb or buildings.obj).
+- Unity **GIS Environment Builder** window (*DroneCV > GIS Environment
+  Builder…*) — the whole B pipeline from inside Unity, no CLI: auto-installs a
+  private Python, builds the area, imports terrain + objects into the current or
+  a new scene, exports to OBJ/glTF/Prefab/FBX, and can merge a district into one
+  object + one material (shader `DroneCV/DistrictMerged`, vertex-colour tint over
+  a shared tiling facade texture). Reuses the Python pipeline and the importer.
 - `buildings.obj` — plain OBJ fallback (no materials), CAD-friendly.
 
 ## Level of detail, honestly

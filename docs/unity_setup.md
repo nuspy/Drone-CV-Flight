@@ -2,7 +2,13 @@
 
 Full setup guide: [`unity/com.dronecv.flight/Documentation~/setup.md`](../unity/com.dronecv.flight/Documentation~/setup.md).
 
-Summary:
+The package has two independent uses: the **GIS Environment Builder** (the 3D
+product — menu *DroneCV > GIS Environment Builder…*, which auto-installs its own
+Python, generates an area, imports it into the current/new scene, exports to
+OBJ/glTF/Prefab/FBX and can merge a district into one object+material) and the
+**sim bridge** (the navigation product, below). They share nothing at runtime.
+
+Summary (sim bridge):
 
 1. Add the `unity/com.dronecv.flight` package to your Unity 6.x project
    (Package Manager → *Install package from disk*). It depends only on

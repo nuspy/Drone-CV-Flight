@@ -2,7 +2,7 @@
   "name": "com.dronecv.flight",
   "version": "0.1.0",
   "displayName": "DroneCV Flight",
-  "description": "Training capture, simulation bridge and mock sensors for the dronecv GPS-denied visual navigation system. Speaks the dronecv wire protocol v1.0 over TCP; the Python side cannot tell this bridge apart from the headless simulator.",
+  "description": "Two tools in one package. (1) GIS Environment Builder: an Editor window (DroneCV > GIS Environment Builder…) that generates a real-world 3D area via the dronecv Python pipeline (auto-installed), imports terrain+buildings+trees directly into the scene, exports to OBJ/glTF/Prefab/FBX, and can merge a district into one object+material. (2) Simulation bridge and mock sensors that speak the dronecv wire protocol v1.0 over TCP; the Python side cannot tell this bridge apart from the headless simulator.",
   "unity": "6000.0",
   "documentationUrl": "",
   "dependencies": {

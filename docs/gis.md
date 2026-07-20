@@ -212,6 +212,15 @@ hard/water weights), `trees.json` (instances with density+typology),
   splat layers, TreeInstances by type/density, the building meshes with
   colliders and a GeoAnchorAsset — ready for the SimLoop rig
   (*GameObject > DroneCV > Create Sim Rig*) and `dronecv run-all`.
+- **Unity — GIS Environment Builder** (menu **DroneCV > GIS Environment
+  Builder…**): a full Editor GUI that drives this same Python pipeline from
+  inside Unity. It **auto-installs** a private Python (downloading a standalone
+  CPython if the system has none), builds the area, imports the terrain +
+  objects **directly into the current or a new scene**, exports to OBJ / glTF /
+  Prefab / FBX, and can **merge a district** (whole scene / per class / 500 m
+  cell) into one object + one material. It reuses the CLI and the importer —
+  nothing is reimplemented — and contains no training/localization/reliability
+  logic (that stays in the Python navigation product).
 - **Blender**: `blender --python blender_build_scene.py -- <export dir>`
   assembles terrain mesh, buildings and dupli-vert instanced forests.
 

@@ -1,6 +1,47 @@
 # DroneCV Flight — Unity 6.5 setup
 
-This package turns any Unity scene into a dronecv simulator: the Python side
+This package has two independent uses that share nothing at runtime:
+
+- **GIS Environment Builder** (menu **DroneCV > GIS Environment Builder…**) — the
+  3D-product side: generate a real-world area and import terrain + buildings +
+  trees directly into your scene, export to other formats, and optionally merge a
+  district into one object + one material. It needs no ML and installs its own
+  Python (see below).
+- **Sim bridge** (menu **GameObject > DroneCV > Create Sim Rig**) — the
+  navigation side: turns any Unity scene into a dronecv simulator over TCP. This
+  is unchanged and documented further down.
+
+## GIS Environment Builder
+
+Open **DroneCV > GIS Environment Builder…**. The window drives the same Python
+`dronecv` GIS pipeline the CLI uses — it does **not** reimplement anything.
+
+1. **Python environment (auto-installed).** Press *Install environment*. The
+   package provisions a private Python under `Library/DroneCV/py` (never
+   system-wide): it uses a system Python ≥3.11 if present, otherwise downloads a
+   standalone CPython automatically, creates a venv, and `pip install`s
+   `dronecv[gis]`. No manual Python/pip/venv setup is required. Set
+   `DRONECV_PY_SOURCE` to a repo checkout or a wheel if you install offline.
+2. **Build the area.** Enter an env name and a place name or bounding box, pick
+   resolution/sources, press *Build*. Progress streams into the log.
+3. **Import into Unity.** Choose *Current scene* or *New empty scene* and press
+   *Export scene + import into Unity* — the terrain (with collider), buildings
+   (glTF/OBJ with colliders), trees and a GeoAnchorAsset are created via the same
+   `DroneCV > Import GIS Scene…` importer.
+4. **Export** to OBJ (native), glTF/GLB, a Unity Prefab + TerrainData, or FBX
+   (only if `com.unity.formats.fbx` is installed).
+5. **Merge district** (optional) collapses the imported buildings into one mesh
+   + one material per unit (whole scene / per class / 500 m cell), baking each
+   building's colour into vertex colours over one shared tiling facade texture
+   (shader `DroneCV/DistrictMerged`) — the standard way to keep a repeatable
+   material working across a merged object while cutting draw calls.
+
+The tooltips in the window explain every field (resolution, sources, terrain
+resolution, cell size, …).
+
+---
+
+This package also turns any Unity scene into a dronecv simulator: the Python side
 (training, localization, automated flight test) talks to it over TCP exactly
 as it talks to the built-in headless simulator, and cannot tell them apart.
 

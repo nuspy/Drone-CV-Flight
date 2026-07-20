@@ -3,6 +3,7 @@
     "rootNamespace": "DroneCV.Flight.Tests",
     "references": [
         "DroneCV.Flight.Runtime",
+        "DroneCV.Flight.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
