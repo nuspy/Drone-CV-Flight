@@ -20,7 +20,7 @@ reale dai dati GIS aperti.
 | Cosa | Note |
 |---|---|
 | Python 3.11+ | `python --version` |
-| Installazione | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]"` (usa un venv) |
+| Installazione | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]" -c constraints.txt` (usa un venv; il file constraints blocca versioni testate ed evita il backtracking del resolver di pip) |
 | GPU | opzionale — tutto gira su CPU; con CUDA il training è molto più veloce |
 | Blender 3.6+/4.x | solo per l'export nativo `.blend` (deve stare nel `PATH`) |
 | Unity 2022.3+ | solo per la scena Unity; installa il package **glTFast** (`com.unity.cloud.gltfast`) per i materiali |

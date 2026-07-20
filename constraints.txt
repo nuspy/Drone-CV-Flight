@@ -1,0 +1,30 @@
+# Tested version pins (the exact environment the test suite runs on).
+# Use to avoid pip dependency-resolver backtracking:
+#
+#     pip install -e ".[dev,gis]" -c constraints.txt
+#
+# These are CONSTRAINTS, not requirements: only packages actually pulled in
+# are affected. Update by re-running the suite against newer versions.
+numpy==2.4.6
+opencv-python-headless==5.0.0.93
+pydantic==2.13.4
+typer==0.27.0
+rich==15.0.0
+pyyaml==6.0.1
+pymap3d==3.2.0
+jinja2==3.1.6
+torch==2.13.0
+matplotlib==3.11.1
+pytest==9.1.1
+ruff==0.15.22
+httpx==0.28.1
+fastapi==0.139.2
+uvicorn==0.51.0
+python-multipart==0.0.32
+onnx==1.22.0
+onnxruntime==1.27.0
+shapely==2.1.2
+rasterio==1.4.4
+pyproj==3.7.2
+mapbox_earcut==2.0.0
+pillow==12.3.0

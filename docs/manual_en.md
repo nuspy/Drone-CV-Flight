@@ -20,7 +20,7 @@ open GIS data.
 | What | Notes |
 |---|---|
 | Python 3.11+ | `python --version` |
-| Project install | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]"` (use a venv) |
+| Project install | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]" -c constraints.txt` (use a venv; the constraints file pins tested versions and prevents pip resolver backtracking) |
 | GPU | optional — everything runs on CPU; CUDA makes training much faster |
 | Blender 3.6+/4.x | only for the native `.blend` export (must be on `PATH`) |
 | Unity 2022.3+ | only for the Unity scene; install the **glTFast** package (`com.unity.cloud.gltfast`) for materials |
