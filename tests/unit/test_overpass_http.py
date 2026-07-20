@@ -1,11 +1,10 @@
-"""Overpass HTTP layer: UA header, mirror fallback, custom URL honored."""
+"""Overpass HTTP layer: identifying UA, hedged mirrors, first-good-wins."""
 
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from dronecv.gis.providers import overpass_http
 from dronecv.gis.providers.overpass_http import MIRRORS, overpass_query
 
 
@@ -22,20 +21,35 @@ class FakeResponse:
         return self._payload
 
 
-def test_falls_back_across_mirrors_on_406(monkeypatch):
-    calls = []
+def test_first_good_mirror_wins(monkeypatch):
+    seen_headers = []
 
     def fake_post(url, data=None, headers=None, timeout=None):
-        calls.append((url, headers))
-        # First mirror rejects like overpass-api.de does without a UA policy
-        # match; the second succeeds.
-        return FakeResponse(406) if len(calls) == 1 else FakeResponse(200, {"elements": [1]})
+        seen_headers.append(headers)
+        # Only the private.coffee mirror answers; the others reject (retryable).
+        if "private.coffee" in url:
+            return FakeResponse(200, {"elements": [1]})
+        return FakeResponse(504)
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    out = overpass_query("[out:json];")
+    out = overpass_query("[out:json];", stagger_s=0.0)
     assert out == {"elements": [1]}
-    assert calls[0][0] == MIRRORS[0] and calls[1][0] == MIRRORS[1]
-    assert "dronecv" in calls[0][1]["User-Agent"]  # identifying UA always sent
+    assert all("dronecv" in h["User-Agent"] for h in seen_headers)  # UA always sent
+
+
+def test_all_mirrors_reject_raises(monkeypatch):
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResponse(504))
+    with pytest.raises(RuntimeError, match="all Overpass endpoints failed"):
+        overpass_query("[out:json];", stagger_s=0.0)
+
+
+def test_all_mirrors_time_out_raises(monkeypatch):
+    def boom(*a, **k):
+        raise httpx.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(httpx, "post", boom)
+    with pytest.raises(RuntimeError, match="all Overpass endpoints failed"):
+        overpass_query("[out:json];", stagger_s=0.0)
 
 
 def test_custom_url_used_exclusively(monkeypatch):
@@ -43,19 +57,23 @@ def test_custom_url_used_exclusively(monkeypatch):
 
     def fake_post(url, data=None, headers=None, timeout=None):
         calls.append(url)
-        return FakeResponse(406)
+        return FakeResponse(200, {"elements": [7]})
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    with pytest.raises(RuntimeError, match="all Overpass endpoints failed"):
-        overpass_query("[out:json];", url="https://my.private/api")
-    assert calls == ["https://my.private/api"]
+    out = overpass_query("[out:json];", url="https://my.private/api")
+    assert out == {"elements": [7]}
+    assert calls == ["https://my.private/api"]  # never touched the public mirrors
 
 
-def test_all_mirrors_down_raises(monkeypatch):
-    monkeypatch.setattr(
-        httpx, "post",
-        lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("boom")),
-    )
-    with pytest.raises(RuntimeError, match="all Overpass endpoints failed"):
-        overpass_query("[out:json];")
-    assert overpass_http.MIRRORS  # sanity: mirror list non-empty
+def test_default_url_in_mirrors_triggers_hedge(monkeypatch):
+    # Passing a URL that IS one of the mirrors means "use all mirrors hedged".
+    calls = set()
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        calls.add(url)
+        return FakeResponse(200 if "kumi" in url else 504)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    out = overpass_query("[out:json];", url=MIRRORS[0], stagger_s=0.0)
+    assert out == {"elements": []}
+    assert len(calls) >= 1  # hedged across mirrors, not just the passed one

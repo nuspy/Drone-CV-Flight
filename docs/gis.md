@@ -65,6 +65,18 @@ same cell, in any request or session), not as one giant bbox request:
 - Overture is scanned once over the union of missing cells and partitioned
   into the per-cell caches (no per-cell parquet re-scan).
 
+Overpass queries are **hedged** across the public mirrors: the fastest one to
+answer wins, with a short (40 s) timeout and a 7 s stagger between mirrors, so
+a hung instance (which changes minute to minute) no longer costs a full
+timeout — a tiny per-cell query returns in seconds instead of minutes.
+
+A cell whose data of one kind failed is **not** cached (buildings, landcover
+and POIs are cached separately), so reusing that cell later refetches only the
+missing kind — a build that got roads but not buildings for a cell will
+retry the buildings. Only an explicit **Skip data** choice marks a cell final
+(a `.skip` sentinel). To finish a partially-built area, just re-run the build:
+it resumes from the cache and fetches the deferred cells.
+
 On a cell that fails after all mirrors, there is **no silent source switch**.
 The CLI policy is `--on-cell-fail {defer|skip|abort|fallback}` (default
 `defer`: collect the failures, write `download_manifest.json`, finish the

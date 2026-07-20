@@ -186,6 +186,39 @@ class TestOrchestrator:
         assert all(s == "504" for s in seen_sigs)  # same signature grouped
 
 
+class TestPartialCellRetry:
+    """A cell that got landcover but NOT buildings (buildings deferred) must
+    refetch buildings on reuse — each data kind is cached independently, and a
+    failed fetch is never cached. Only an explicit SKIP marks a cell final."""
+
+    def test_deferred_kind_is_not_cached_and_refetches(self, tmp_path):
+        cells = cells_for_bbox(BBox(47.500, 19.040, 47.503, 19.043))
+        # buildings cache: one cell failed (deferred -> no cache written)
+        bcache = CellCache("osm-buildings", "osm", root=tmp_path)
+        fail = {cells[0].id}
+        prov = _Provider(fail)
+        fetch_cells("buildings", cells, prov, "osm", bcache)
+        assert not bcache.has(cells[0].id)  # deferred cell NOT cached
+        assert bcache.has(cells[1].id)      # the others are
+
+        # Reuse the same cells: the deferred one is retried (still no cache),
+        # the rest are served from cache (not refetched).
+        prov2 = _Provider(fail)
+        _, rep = fetch_cells("buildings", cells, prov2, "osm", bcache)
+        assert cells[0].id in prov2.calls               # retried
+        assert cells[1].id not in prov2.calls           # cached, skipped
+        assert cells[0].id in rep.deferred
+
+    def test_skip_is_final(self, tmp_path):
+        cells = cells_for_bbox(BBox(47.500, 19.040, 47.503, 19.043))
+        cache = CellCache("osm-buildings", "osm", root=tmp_path)
+        fetch_cells("buildings", cells, _Provider({cells[0].id}), "osm", cache,
+                    decide=lambda c, e, s: Decision.SKIP)
+        prov2 = _Provider({cells[0].id})
+        fetch_cells("buildings", cells, prov2, "osm", cache)
+        assert cells[0].id not in prov2.calls  # skipped cell is never retried
+
+
 class TestMerge:
     def test_dedup_boundary_buildings_by_osm_id(self):
         # same building returned by two adjacent cells
