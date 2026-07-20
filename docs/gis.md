@@ -49,6 +49,32 @@ from Overpass.
    tagged buildings within ~250 m (a fixed default flattens dense centers);
 5. per-class defaults (residential 7 m, industrial 9 m, landmark 25 m, …).
 
+## Parcelled downloads: a fixed cell grid with per-cell cache
+
+Vector data (OSM/Overpass, Overture) is downloaded cell by cell on a **fixed
+global 500 m grid** (anchored at 0,0 — the same ground square is always the
+same cell, in any request or session), not as one giant bbox request:
+
+- a failed cell loses only ~500 m, and Overpass per-cell queries are small
+  enough that they rarely 504;
+- every successful cell is **cached** under
+  `~/.cache/dronecv/gis/cells/<source-kind>/<version>/<cell>.json` — a
+  re-run only fetches what's missing (aborting a build keeps what was
+  downloaded; a second build of the same area is instant), and overlapping
+  selections resolve to the same cells and are processed once;
+- Overture is scanned once over the union of missing cells and partitioned
+  into the per-cell caches (no per-cell parquet re-scan).
+
+On a cell that fails after all mirrors, there is **no silent source switch**.
+The CLI policy is `--on-cell-fail {defer|skip|abort|fallback}` (default
+`defer`: collect the failures, write `download_manifest.json`, finish the
+reachable cells, resume on the next run). The desktop GUI draws the grid on
+the map colored live by status (cached green / fetched blue / deferred orange
+/ skipped grey / failed red) and, on a failure, asks per cell — skip, use the
+other source, retry at end, or abandon — with an "apply to all cells with the
+same error" option; at the end it offers to retry the deferred cells.
+`dronecv gis cells --bbox …` reports the cache status of an area.
+
 ## Clouds: detection + multi-date cloud-free compositing (`--imagery s2`)
 
 Satellite photos are frequently obstructed by clouds. Two mechanisms:

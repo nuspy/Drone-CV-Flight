@@ -119,3 +119,51 @@ def test_coverage_recommendation_prefers_reachable_source():
                         "heights": "shadow+defaults"},
     })
     assert st.selected_sources["buildings"] == "overture"
+
+
+def test_cell_decision_controller_apply_to_all():
+    from dronecv.gis.parcel_fetch import Decision
+    from dronecv.gui.app import CellDecisionController
+
+    ctrl = CellDecisionController()
+    asked = []
+
+    def ask(cell, err, sig):
+        asked.append(sig)
+        return Decision.SKIP, True  # apply to all with this signature
+
+    # First 504 asks the user; subsequent 504s reuse the memo without asking.
+    d1 = ctrl.decide("c1", RuntimeError("504"), "504", ask)
+    d2 = ctrl.decide("c2", RuntimeError("504"), "504", ask)
+    assert d1 == d2 == Decision.SKIP
+    assert asked == ["504"]  # asked once, applied to all
+
+    # A different signature asks again.
+    ctrl.decide("c3", RuntimeError("timeout"), "timeout", ask)
+    assert asked == ["504", "timeout"]
+
+
+def test_cell_decision_no_apply_asks_each_time():
+    from dronecv.gis.parcel_fetch import Decision
+    from dronecv.gui.app import CellDecisionController
+
+    ctrl = CellDecisionController()
+    calls = {"n": 0}
+
+    def ask(cell, err, sig):
+        calls["n"] += 1
+        return Decision.DEFER, False  # do NOT apply to all
+
+    ctrl.decide("c1", RuntimeError("504"), "504", ask)
+    ctrl.decide("c2", RuntimeError("504"), "504", ask)
+    assert calls["n"] == 2  # asked every time
+
+
+def test_cells_json_for_selection():
+    from dronecv.gui.app import GuiState
+
+    st = GuiState()
+    st.set_mask(_rect_geojson(47.500, 19.040, 47.506, 19.050))
+    import json
+    cells = json.loads(st.cells_json())
+    assert cells and all({"id", "s", "w", "n", "e"} <= set(c) for c in cells)

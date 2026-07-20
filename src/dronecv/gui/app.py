@@ -13,6 +13,7 @@ offscreen without a display; the Qt widgets are a thin shell.
 from __future__ import annotations
 
 import json
+import queue
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,34 @@ from dronecv.gis.geometry import BBox
 from dronecv.util.logging import get_logger
 
 log = get_logger("dronecv.gui")
+
+# Cell status -> map color (kept out of the Qt shell so it is testable).
+CELL_COLORS = {
+    "pending": "#bbbbbb", "fetching": "#e0c020", "fetched": "#2b7bd0",
+    "cached": "#3fa34d", "deferred": "#e08a1e", "skipped": "#666666",
+    "fallback": "#8e44ad", "aborted": "#c0392b", "failed": "#c0392b",
+}
+
+
+class CellDecisionController:
+    """Per-cell failure decisions with an "apply to all cells with the same
+    error" memo. Pure logic (no Qt): `ask(cell, error, sig) -> (Decision,
+    apply_all: bool)` is supplied by the caller (a dialog in the GUI, a fake
+    in tests)."""
+
+    def __init__(self):
+        self._memo: dict = {}  # error signature -> Decision
+
+    def decide(self, cell, error, sig, ask):
+        if sig in self._memo:
+            return self._memo[sig]
+        decision, apply_all = ask(cell, error, sig)
+        if apply_all:
+            self._memo[sig] = decision
+        return decision
+
+    def reset(self):
+        self._memo.clear()
 
 
 @dataclass
@@ -39,6 +68,7 @@ class GuiState:
     reconstruct: bool = False
     palette_photos: str | None = None
     allow_overture_fallback: bool = False
+    cell_m: float = 500.0
 
     def set_mask(self, geojson_text: str) -> BBox:
         gj = json.loads(geojson_text)
@@ -49,6 +79,20 @@ class GuiState:
         self.mask_geojson = gj
         self.bbox = BBox(min(lats), min(lons), max(lats), max(lons))
         return self.bbox
+
+    def cells_json(self) -> str:
+        """GeoJSON-ish payload for the map grid: the fixed 500 m cells that
+        cover the current AOI (drawn grey, colored live during the build)."""
+        from dronecv.gis.parcels import cells_for_bbox
+
+        if self.bbox is None:
+            return "[]"
+        cells = cells_for_bbox(self.bbox, self.cell_m)
+        return json.dumps([
+            {"id": c.id, "s": c.bbox.south, "w": c.bbox.west,
+             "n": c.bbox.north, "e": c.bbox.east}
+            for c in cells
+        ])
 
     def apply_coverage(self, report: dict) -> dict:
         """Store the coverage report and auto-preselect sources (the user can
@@ -115,11 +159,13 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             QCheckBox,
             QComboBox,
             QDoubleSpinBox,
+            QFileDialog,
             QFormLayout,
             QHBoxLayout,
             QLabel,
             QLineEdit,
             QMainWindow,
+            QMessageBox,
             QPlainTextEdit,
             QProgressBar,
             QPushButton,
@@ -138,6 +184,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
     class Bridge(QObject):
         mask_drawn = Signal(str)
         mask_deleted = Signal()
+        map_moved = Signal(float, float, int)
+        map_ready = Signal()
 
         @Slot(str)
         def maskDrawn(self, geojson: str) -> None:  # noqa: N802 (JS naming)
@@ -146,6 +194,14 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         @Slot()
         def maskDeleted(self) -> None:  # noqa: N802 (JS naming)
             self.mask_deleted.emit()
+
+        @Slot(float, float, int)
+        def mapMoved(self, lat: float, lon: float, zoom: int) -> None:  # noqa: N802
+            self.map_moved.emit(lat, lon, zoom)
+
+        @Slot()
+        def mapReady(self) -> None:  # noqa: N802
+            self.map_ready.emit()
 
     class CoverageWorker(QThread):
         done = Signal(dict)
@@ -167,23 +223,62 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         done = Signal(str)
         failed = Signal(str)
         progress = Signal(str)
+        cell_status = Signal(str, str)           # (cell_id, status)
+        cell_failed = Signal(str, str, str)      # (cell_id, reason, error_sig)
 
-        def __init__(self, kwargs: dict, parent=None):
+        def __init__(self, kwargs: dict, controller, parent=None):
             super().__init__(parent)
             self.kwargs = kwargs
+            self.controller = controller
+            self._answers: queue.Queue = queue.Queue()  # main thread -> worker
+
+        def answer(self, decision, apply_all: bool) -> None:
+            """Called from the GUI thread with the user's dialog choice."""
+            self._answers.put((decision, apply_all))
+
+        def _ask(self, cell, error, sig):
+            # Runs in the worker thread: surface the dialog, block for the answer.
+            self.cell_failed.emit(cell.id, str(error), sig)
+            return self._answers.get()
+
+        def _decide(self, cell, error, sig):
+            self.cell_status.emit(cell.id, "failed")
+            return self.controller.decide(cell, error, sig, self._ask)
 
         def run(self) -> None:
             try:
                 from dronecv.gis.pipeline import build_environment
 
                 root = find_config_root()
-                self.progress.emit("downloading and building — this can take a while…")
+                self.progress.emit("downloading cells and building — this can take a while…")
                 gis_dir = build_environment(
-                    out_root=root / "artifacts" / "gis", configs_root=root, **self.kwargs
+                    out_root=root / "artifacts" / "gis", configs_root=root,
+                    decide=self._decide,
+                    on_cell_status=lambda cell, s: self.cell_status.emit(cell.id, s),
+                    **self.kwargs,
                 )
                 self.done.emit(str(gis_dir))
             except Exception as e:  # noqa: BLE001
                 self.failed.emit(str(e))
+
+    class ActionWorker(QThread):
+        """Runs one post-build CLI function (train / test / photo / export)
+        off the UI thread."""
+
+        done = Signal(str)
+        failed = Signal(str)
+
+        def __init__(self, fn, label: str, parent=None):
+            super().__init__(parent)
+            self.fn = fn
+            self.label = label
+
+        def run(self) -> None:
+            try:
+                msg = self.fn() or ""
+                self.done.emit(f"{self.label}: done. {msg}")
+            except Exception as e:  # noqa: BLE001
+                self.failed.emit(f"{self.label} failed: {e}")
 
     class MainWindow(QMainWindow):
         def __init__(self):
@@ -256,6 +351,38 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.status.setWordWrap(True)
             form.addWidget(self.status)
 
+            # ---- after-build actions (train / test / photo / export) ----
+            form.addWidget(QLabel("After build (uses the Env name above):"))
+            act = QFormLayout()
+            self.budget_spin = QDoubleSpinBox(minimum=200, maximum=100000, value=3000,
+                                              singleStep=500, decimals=0)
+            train_row = QHBoxLayout()
+            self.train_btn = QPushButton("Train")
+            self.train_btn.clicked.connect(self.on_train)
+            self.eval_btn = QPushButton("Evaluate")
+            self.eval_btn.clicked.connect(self.on_evaluate)
+            train_row.addWidget(self.train_btn)
+            train_row.addWidget(self.eval_btn)
+            act.addRow("Budget", self.budget_spin)
+            act.addRow("Model", self._row_widget(train_row))
+            self.episodes_spin = QDoubleSpinBox(minimum=1, maximum=100, value=12, decimals=0)
+            self.test_btn = QPushButton("Reliability test")
+            self.test_btn.clicked.connect(self.on_reliability)
+            act.addRow("Episodes", self.episodes_spin)
+            act.addRow("", self.test_btn)
+            self.photo_btn = QPushButton("Localize a photo…")
+            self.photo_btn.clicked.connect(self.on_localize_photo)
+            act.addRow("", self.photo_btn)
+            self.export_combo = QComboBox()
+            self.export_combo.addItems(["glTF/GLB scene", "OBJ", "Blender .blend", "Unity assets"])
+            self.terrain_spin = QDoubleSpinBox(minimum=129, maximum=2049, value=513, decimals=0)
+            self.export_btn = QPushButton("Export 3D")
+            self.export_btn.clicked.connect(self.on_export)
+            act.addRow("Export", self.export_combo)
+            act.addRow("Terrain res", self.terrain_spin)
+            act.addRow("", self.export_btn)
+            form.addLayout(act)
+
             # ---- map ----
             self.web = QWebEngineView()
             self.bridge = Bridge()
@@ -265,6 +392,12 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.web.setHtml(MAP_HTML, baseUrl=QUrl("https://dronecv.local/"))
             self.bridge.mask_drawn.connect(self.on_mask)
             self.bridge.mask_deleted.connect(self.on_mask_deleted)
+            self.bridge.map_moved.connect(self.on_map_moved)
+            self.bridge.map_ready.connect(self.on_map_ready)
+
+            from dronecv.gui.session import load_session
+
+            self._session = load_session()
 
             split = QSplitter()
             split.addWidget(panel)
@@ -294,6 +427,10 @@ def run_gui() -> None:  # pragma: no cover - requires a display
 
         def on_mask(self, geojson: str) -> None:
             bbox = self.state.set_mask(geojson)
+            self._save_session()  # remember the selection for next time
+            # Draw the fixed 500 m download grid over the AOI (grey; colored
+            # live during the build).
+            self.web.page().runJavaScript(f"drawCells({self.state.cells_json()!r})")
             self.status.setText(
                 f"area: {bbox.south:.4f},{bbox.west:.4f} → {bbox.north:.4f},{bbox.east:.4f} — "
                 "checking coverage (OSM + Overture + Sentinel-2, can take ~1 min)…"
@@ -332,6 +469,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self._threads.append(worker)
 
         def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+            self._save_session()
             # Give running threads a moment; then detach hard so a long
             # network call or build cannot block the window from closing.
             for w in list(self._threads):
@@ -393,16 +531,62 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         def on_build(self) -> None:
             self.build_btn.setEnabled(False)
             self.progress.setVisible(True)
-            worker = BuildWorker(self.state.build_kwargs(), parent=self)
+            self.web.page().runJavaScript(f"drawCells({self.state.cells_json()!r})")
+            self._controller = CellDecisionController()
+            worker = BuildWorker(self.state.build_kwargs(), self._controller, parent=self)
+            self._build_worker = worker
             self._register(worker)
             worker.progress.connect(self.status.setText)
+            worker.cell_status.connect(self.on_cell_status)
+            worker.cell_failed.connect(self.on_cell_failed)
             worker.done.connect(self.on_built)
             worker.failed.connect(self.on_build_failed)
             worker.start()
 
+        def on_cell_status(self, cell_id: str, status: str) -> None:
+            color = CELL_COLORS.get(status, "#bbbbbb")
+            self.web.page().runJavaScript(f"setCellColor({cell_id!r}, {color!r})")
+
+        def on_cell_failed(self, cell_id: str, reason: str, sig: str) -> None:
+            """All mirrors failed for this cell: ask the user what to do. Runs
+            in the GUI thread; the worker is blocked waiting for the answer."""
+            from dronecv.gis.parcel_fetch import Decision
+
+            box = QMessageBox(self)
+            box.setWindowTitle("Cell download failed")
+            box.setText(f"Cell {cell_id} could not be downloaded.\n\n{reason}")
+            b_retry = box.addButton("Fallback other source", QMessageBox.AcceptRole)
+            b_skip = box.addButton("Skip (never retry)", QMessageBox.DestructiveRole)
+            b_defer = box.addButton("Retry at end", QMessageBox.ActionRole)
+            b_abort = box.addButton("Abandon build", QMessageBox.RejectRole)
+            apply_all = QCheckBox("apply to all cells with the same error in this run")
+            box.setCheckBox(apply_all)
+            box.exec()
+            clicked = box.clickedButton()
+            decision = {
+                b_retry: Decision.FALLBACK, b_skip: Decision.SKIP,
+                b_defer: Decision.DEFER, b_abort: Decision.ABORT,
+            }.get(clicked, Decision.DEFER)
+            self._build_worker.answer(decision, apply_all.isChecked())
+
         def on_built(self, gis_dir: str) -> None:
             self.progress.setVisible(False)
+            self.build_btn.setEnabled(True)
             name = self.state.env_name.strip()
+            # Offer to retry the deferred cells (resumes from cache).
+            import json as _json
+
+            manifest = Path(gis_dir) / "download_manifest.json"
+            deferred = _json.loads(manifest.read_text()).get("deferred", []) if manifest.exists() else []
+            if deferred:
+                total = self.state.cells_json().count('"id"')
+                ans = QMessageBox.question(
+                    self, "Retry deferred cells",
+                    f"{len(deferred)} of {total} cells were deferred. Retry them now?",
+                )
+                if ans == QMessageBox.Yes:
+                    self.on_build()  # resume: cached cells are skipped
+                    return
             self.status.setText(
                 f"environment built at {gis_dir}\nNext: dronecv run-all --env {name}"
             )
@@ -411,6 +595,142 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.progress.setVisible(False)
             self.build_btn.setEnabled(True)
             self.status.setText(f"build failed: {err}")
+
+        # -------------------------------------------------- session persistence
+
+        @staticmethod
+        def _row_widget(layout):
+            from PySide6.QtWidgets import QWidget as _W
+
+            w = _W()
+            w.setLayout(layout)
+            return w
+
+        def _save_session(self) -> None:
+            from dronecv.gui.session import save_session
+
+            self._session.update({
+                "env_name": self.env_edit.text(),
+                "buildings": self.bld_combo.currentText(),
+                "imagery": self.imagery_combo.currentIndex(),
+                "res_m": float(self.res_spin.value()),
+                "selection": self.state.mask_geojson,
+            })
+            try:
+                save_session(self._session)
+            except OSError:
+                pass
+
+        def on_map_moved(self, lat: float, lon: float, zoom: int) -> None:
+            self._session["map"] = {"lat": lat, "lon": lon, "zoom": zoom}
+            self._save_session()
+
+        def on_map_ready(self) -> None:
+            s = self._session
+            if s.get("map"):
+                m = s["map"]
+                self.web.page().runJavaScript(f"restoreView({m['lat']},{m['lon']},{m['zoom']})")
+            if s.get("selection"):
+                self.web.page().runJavaScript(f"restoreSelection({json.dumps(s['selection'])!r})")
+            if s.get("env_name"):
+                self.env_edit.setText(s["env_name"])
+            if s.get("buildings"):
+                self.bld_combo.setCurrentText(s["buildings"])
+            if s.get("res_m"):
+                self.res_spin.setValue(float(s["res_m"]))
+
+        # ----------------------------------------------------- post-build actions
+
+        def _run_action(self, label: str, fn) -> None:
+            env = self.env_edit.text().strip()
+            if not env:
+                self.status.setText("set the Env name first")
+                return
+            self.status.setText(f"{label}… (see console for progress)")
+            worker = ActionWorker(fn, label, parent=self)
+            self._register(worker)
+            worker.done.connect(self.status.setText)
+            worker.failed.connect(self.status.setText)
+            worker.start()
+
+        def on_train(self) -> None:
+            env, budget = self.env_edit.text().strip(), int(self.budget_spin.value())
+
+            def fn():
+                from dronecv.commands.train_cmd import run_train
+
+                run_train(env, None, budget, None)
+                return f"budget {budget}"
+
+            self._run_action("training", fn)
+
+        def on_evaluate(self) -> None:
+            env = self.env_edit.text().strip()
+
+            def fn():
+                from dronecv.commands.evaluate_cmd import run_evaluate
+
+                run_evaluate(env, None)
+
+            self._run_action("evaluate", fn)
+
+        def on_reliability(self) -> None:
+            env, episodes = self.env_edit.text().strip(), int(self.episodes_spin.value())
+
+            def fn():
+                from dronecv.commands.test_flight_cmd import run_test_flight
+
+                code = run_test_flight(env, None, episodes, None)
+                return "PASSED" if code == 0 else "FAILED (see report)"
+
+            self._run_action("reliability test", fn)
+
+        def on_localize_photo(self) -> None:
+            env = self.env_edit.text().strip()
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Choose a photo", "", "Images (*.jpg *.jpeg *.png)"
+            )
+            if not path:
+                return
+
+            def fn():
+                from dronecv.commands.photo_cmd import run_localize_photo
+
+                run_localize_photo(env, path, None)
+                return "see console for coordinates + Maps link"
+
+            self._run_action("localize-photo", fn)
+
+        def on_export(self) -> None:
+            env = self.env_edit.text().strip()
+            fmt = self.export_combo.currentText()
+            res = int(self.terrain_spin.value())
+
+            def fn():
+                from pathlib import Path as _P
+
+                from dronecv.config import load_config
+                from dronecv.gis.export.scene_export import export_scene
+
+                cfg = load_config(env)
+                if cfg.world.kind != "gis" or not cfg.world.gis_dir:
+                    raise RuntimeError(f"'{env}' is not a GIS environment")
+                gis_dir = _P(cfg.world.gis_dir)
+                out = export_scene(gis_dir, gis_dir / "scene_export", res)
+                if "blend" in fmt:
+                    import shutil
+                    import subprocess
+
+                    if shutil.which("blender"):
+                        subprocess.run(
+                            ["blender", "--background", "--python",
+                             str(out / "blender_build_scene.py"), "--",
+                             str(out), str(out / f"{env}.blend")], check=True)
+                        return f"{out}/{env}.blend"
+                    return f"assets in {out}; Blender not on PATH (run blender_build_scene.py there)"
+                return str(out)
+
+            self._run_action(f"export ({fmt})", fn)
 
     app = QApplication([])
     win = MainWindow()

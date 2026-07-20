@@ -70,6 +70,7 @@ def build_environment(
     on_cell_fail: str = "defer",
     decide=None,
     cache_root: Path | None = None,
+    on_cell_status=None,
 ) -> Path:
     """`reconstruct_buildings` extracts extra footprints from imagery and
     merges them where GIS vectors have nothing (see
@@ -144,7 +145,8 @@ def build_environment(
     cell_reports = []
 
     def _celled(kind, provider):
-        result, rep = fetch_vector(kind, provider, bbox, cell_m, cache_root, decide)
+        result, rep = fetch_vector(kind, provider, bbox, cell_m, cache_root, decide,
+                                   on_status=on_cell_status)
         cell_reports.append(rep)
         return result
 

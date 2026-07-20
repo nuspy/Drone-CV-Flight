@@ -35,8 +35,19 @@ map.addControl(new L.Control.Draw({
     edit: { featureGroup: drawn }
 }));
 
+const cellLayer = new L.LayerGroup().addTo(map);
+const cellRects = {};
+
 let bridge = null;
-new QWebChannel(qt.webChannelTransport, (channel) => { bridge = channel.objects.bridge; });
+new QWebChannel(qt.webChannelTransport, (channel) => {
+    bridge = channel.objects.bridge;
+    if (bridge && bridge.mapReady) bridge.mapReady();  // request restore
+});
+
+map.on('moveend', () => {
+    const c = map.getCenter();
+    if (bridge) bridge.mapMoved(c.lat, c.lng, map.getZoom());
+});
 
 map.on(L.Draw.Event.CREATED, (e) => {
     drawn.clearLayers();
@@ -51,6 +62,33 @@ map.on(L.Draw.Event.EDITED, (e) => {
 map.on(L.Draw.Event.DELETED, () => {
     if (bridge) bridge.maskDeleted();
 });
+
+// ---- download cell grid (Python -> JS) ----
+function drawCells(cellsJson) {
+    const cells = JSON.parse(cellsJson);
+    cellLayer.clearLayers();
+    for (const k in cellRects) delete cellRects[k];
+    for (const c of cells) {
+        const r = L.rectangle([[c.s, c.w], [c.n, c.e]],
+            { color: '#999', weight: 1, fillColor: '#bbb', fillOpacity: 0.12 });
+        cellLayer.addLayer(r);
+        cellRects[c.id] = r;
+    }
+}
+function setCellColor(id, color) {
+    const r = cellRects[id];
+    if (r) r.setStyle({ color: color, fillColor: color, fillOpacity: 0.45 });
+}
+function clearCells() { cellLayer.clearLayers(); for (const k in cellRects) delete cellRects[k]; }
+
+// ---- session restore (Python -> JS) ----
+function restoreView(lat, lon, zoom) { map.setView([lat, lon], zoom); }
+function restoreSelection(geojson) {
+    drawn.clearLayers();
+    const gj = JSON.parse(geojson);
+    L.geoJSON(gj, { style: { color: '#0b3954' } }).eachLayer(l => drawn.addLayer(l));
+    if (bridge) bridge.maskDrawn(JSON.stringify(gj));
+}
 
 // Called from Python.
 function setView(lat, lon, zoom) { map.setView([lat, lon], zoom); }
