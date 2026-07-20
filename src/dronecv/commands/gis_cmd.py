@@ -15,6 +15,9 @@ def run_gis_build(
     ortho: str | None,
     ortho_utc: str | None,
     res_m: float,
+    reconstruct: bool = False,
+    imagery: str | None = None,
+    imagery_res: float = 10.0,
 ) -> None:
     from dronecv.config import find_config_root
     from dronecv.gis.geometry import parse_bbox
@@ -39,6 +42,9 @@ def run_gis_build(
         ortho_path=Path(ortho) if ortho else None,
         ortho_utc=datetime.fromisoformat(ortho_utc) if ortho_utc else None,
         res_m=res_m,
+        reconstruct_buildings=reconstruct,
+        imagery=imagery,
+        imagery_res_m=imagery_res,
     )
     meta = json.loads((gis_dir / "meta.json").read_text())
     stats = meta["stats"]
@@ -49,7 +55,8 @@ def run_gis_build(
                 "area": f"{meta['width'] * meta['res_m']:.0f} x {meta['height'] * meta['res_m']:.0f} m @ {meta['res_m']} m/px",
                 "anchor": f"{meta['anchor']['lat0']:.5f}, {meta['anchor']['lon0']:.5f}",
                 "buildings": f"{stats.get('n_buildings', 0)} ({stats.get('n_with_height', 0)} tagged, "
-                f"{stats.get('n_shadow_heights', 0)} shadow, {stats.get('n_class_default', 0)} default)",
+                f"{stats.get('n_shadow_heights', 0)} shadow, {stats.get('n_reconstructed', 0)} "
+                f"reconstructed, {stats.get('n_class_default', 0)} default)",
                 "terrain": f"{stats.get('min_ground', 0):.0f}..{stats.get('max_ground', 0):.0f} m rel",
                 "saliency": f"mean density x{stats.get('saliency', {}).get('mean_density_multiplier', 1):.2f}",
                 "next": f"dronecv run-all --env {env_name}",

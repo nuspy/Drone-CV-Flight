@@ -177,11 +177,22 @@ def gis_build(
     ortho: str = typer.Option(None, "--ortho", help="GeoTIFF orthophoto (enables shadow heights + drape)"),
     ortho_utc: str = typer.Option(None, "--ortho-utc", help="Orthophoto acquisition time, ISO-8601 UTC"),
     res: float = typer.Option(1.0, "--res", help="Mosaic resolution m/px"),
+    reconstruct: bool = typer.Option(
+        False, "--reconstruct-buildings",
+        help="Extract extra building footprints from imagery where GIS has none",
+    ),
+    imagery: str = typer.Option(
+        None, "--imagery",
+        help="Imagery source when no --ortho: 'eox' (Sentinel-2 ~10 m) or "
+        "'xyz:<url-template>' (you own the provider ToS)",
+    ),
+    imagery_res: float = typer.Option(10.0, "--imagery-res", help="Imagery resolution m/px"),
 ) -> None:
     """Download DEM + buildings + landcover and build a flyable environment."""
     from dronecv.commands.gis_cmd import run_gis_build
 
-    run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res)
+    run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res,
+                  reconstruct, imagery, imagery_res)
 
 
 @gis_app.command("info")

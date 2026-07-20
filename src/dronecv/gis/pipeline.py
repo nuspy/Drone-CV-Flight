@@ -60,7 +60,15 @@ def build_environment(
     ortho_utc: datetime | None = None,
     max_extent_m: float = 60_000.0,
     fetch_photos: bool = False,
+    reconstruct_buildings: bool = False,
+    imagery: str | None = None,
+    imagery_res_m: float = 10.0,
 ) -> Path:
+    """`reconstruct_buildings` extracts extra footprints from imagery and
+    merges them where GIS vectors have nothing (see
+    providers.footprints_from_imagery). `imagery` selects the source when no
+    local ortho is given: "eox" (Sentinel-2 cloudless WMS, ~10 m/px) or
+    "xyz:<url-template>" (caller owns the provider's terms of service)."""
     if sources is None:
         from dronecv.gis.providers.poi import OverpassPoi
 
@@ -122,13 +130,49 @@ def build_environment(
 
     # ---- buildings: fetch, resolve heights (tags -> shadows -> defaults) ----
     buildings = sources.buildings.fetch(bbox)
-    n_shadow = 0
-    if sources.ortho is not None or ortho_path is not None:
-        ortho = sources.ortho
-        if ortho is None:
-            from dronecv.gis.providers.imagery import load_geotiff_ortho
+    ortho = sources.ortho
+    if ortho is None and ortho_path is not None:
+        from dronecv.gis.providers.imagery import load_geotiff_ortho
 
-            ortho = load_geotiff_ortho(ortho_path, anchor, ortho_utc, target_res_m=max(res_m, 0.5))
+        ortho = load_geotiff_ortho(ortho_path, anchor, ortho_utc, target_res_m=max(res_m, 0.5))
+    if ortho is None and reconstruct_buildings and imagery:
+        from dronecv.gis.providers.footprints_from_imagery import (
+            fetch_wms_ortho,
+            fetch_xyz_ortho,
+        )
+
+        if imagery == "eox":
+            ortho = fetch_wms_ortho(bbox, anchor, res_m=imagery_res_m)
+            meta.attribution.append(
+                "Sentinel-2 cloudless by EOX IT Services (CC BY-NC-SA 4.0), non-commercial"
+            )
+        elif imagery.startswith("xyz:"):
+            zoom = max(12, min(19, int(round(math.log2(156543.03 / 256.0 / max(imagery_res_m, 0.05))))))
+            ortho = fetch_xyz_ortho(bbox, anchor, imagery[4:], zoom=zoom)
+        else:
+            raise ValueError(f"unknown imagery source '{imagery}' (use 'eox' or 'xyz:<template>')")
+
+    n_reconstructed = 0
+    if reconstruct_buildings:
+        if ortho is None:
+            log.warning("reconstruct_buildings requested but no imagery available — skipped")
+        else:
+            from dronecv.gis.providers.footprints_from_imagery import (
+                extract_footprints,
+                merge_footprints,
+            )
+
+            sun_az = None
+            if ortho.utc is not None:
+                from dronecv.geo import celestial
+
+                sun = celestial.sun_position(ortho.utc, anchor.lat0, anchor.lon0)
+                sun_az = sun.azimuth_deg if sun.elevation_deg > 5.0 else None
+            extracted = extract_footprints(ortho, anchor, sun_azimuth_deg=sun_az)
+            n_reconstructed = merge_footprints(buildings, extracted, anchor)
+
+    n_shadow = 0
+    if ortho is not None:
         n_shadow = estimate_heights_from_shadows(buildings, anchor, ortho)
 
     landcover = sources.landcover.fetch(bbox)
@@ -173,6 +217,7 @@ def build_environment(
         "min_ground": min_ground,
         "max_ground": max_ground,
         "n_shadow_heights": n_shadow,
+        "n_reconstructed": n_reconstructed,
         **height_stats(buildings),
         **b_stats,
         "n_landcover": len(landcover),

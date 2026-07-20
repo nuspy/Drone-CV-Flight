@@ -45,7 +45,34 @@ from Overpass.
    the shadow length L, and `h = L·tan(elevation)`. Robust median over edge
    rays, occlusion-aware, contrast-gated. Accuracy tracks the orthophoto:
    0.2–1 m/px resolves houses; Sentinel-2's 10 m/px only ~15 m+ structures;
-4. per-class defaults (residential 7 m, industrial 9 m, landmark 25 m, …).
+4. **neighbor median**: an untagged building inherits the median height of
+   tagged buildings within ~250 m (a fixed default flattens dense centers);
+5. per-class defaults (residential 7 m, industrial 9 m, landmark 25 m, …).
+
+## Footprint reconstruction from imagery (`--reconstruct-buildings`)
+
+GIS vectors can have gaps (unmapped districts, new construction). With
+`--reconstruct-buildings` the build extracts additional footprints from an
+orthophoto and merges them **only where GIS has nothing** (vector data stays
+authoritative; dedup by overlap):
+
+```
+dronecv gis build --bbox ... --env-name x --reconstruct-buildings \
+    --ortho photo.tif --ortho-utc 2025-06-21T10:00:00Z   # best: your own <1 m/px
+dronecv gis build --bbox ... --env-name x --reconstruct-buildings \
+    --imagery eox --imagery-res 10                        # Sentinel-2 cloudless (free)
+dronecv gis build ... --reconstruct-buildings --imagery "xyz:https://.../{z}/{y}/{x}"
+                                                          # high-res tiles, YOU own the ToS
+```
+
+Chain: imagery → building mask (denoise, brightness vs large-scale local
+reference — a bright-roof detector; a learned segmentation model can be
+plugged via `mask_fn`) → morphology → polygonization (rectangularity gate) →
+optional shadow validation (a real building casts a shadow on the anti-solar
+side at the photo's time) → merge. Reconstructed footprints enter the normal
+height chain (shadow → neighbor-median → default). Honesty: at 10 m/px only
+large structures survive the area gate; real footprint quality needs ≤1 m/px
+imagery (regional orthophotos, or XYZ tiles under their provider's terms).
 
 ## Adaptive POV concentration (saliency)
 
