@@ -202,13 +202,24 @@ def gis_build(
         help="If OSM/Overpass is unavailable, automatically switch to Overture "
         "instead of stopping (off by default — you stay in control of the source)",
     ),
+    cell_m: float = typer.Option(
+        500.0, "--cell-m",
+        help="Download grid cell size in meters (fixed global grid, cached per "
+        "cell so retries/resume only touch what's missing)",
+    ),
+    on_cell_fail: str = typer.Option(
+        "defer", "--on-cell-fail",
+        help="When a cell can't be downloaded (all mirrors failed): "
+        "defer (collect + resume later), skip (leave empty, never retry), "
+        "fallback (other source), abort",
+    ),
 ) -> None:
     """Download DEM + buildings + landcover and build a flyable environment."""
     from dronecv.commands.gis_cmd import run_gis_build
 
     run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res,
                   reconstruct, imagery, imagery_res, palette_photos, ortho_normalize,
-                  allow_overture_fallback)
+                  allow_overture_fallback, cell_m, on_cell_fail)
 
 
 @gis_app.command("info")
@@ -217,6 +228,19 @@ def gis_info(bbox: str = typer.Option(..., "--bbox")) -> None:
     from dronecv.commands.gis_cmd import run_gis_info
 
     run_gis_info(bbox)
+
+
+@gis_app.command("cells")
+def gis_cells(
+    bbox: str = typer.Option(..., "--bbox", help="lat1,lon1,lat2,lon2"),
+    source: str = typer.Option("osm", "--source", help="osm | overture"),
+    cell_m: float = typer.Option(500.0, "--cell-m"),
+) -> None:
+    """Report the per-cell download cache status for an area (cached / missing
+    / skipped) — a build only fetches the missing cells; re-running resumes."""
+    from dronecv.commands.gis_cmd import run_gis_cells
+
+    run_gis_cells(bbox, source, cell_m)
 
 
 @gis_app.command("export-scene")

@@ -21,6 +21,8 @@ def run_gis_build(
     palette_photos: str | None = None,
     ortho_normalize: bool = True,
     allow_overture_fallback: bool = False,
+    cell_m: float = 500.0,
+    on_cell_fail: str = "defer",
 ) -> None:
     from dronecv.config import find_config_root
     from dronecv.gis.geometry import parse_bbox
@@ -51,6 +53,8 @@ def run_gis_build(
         palette_photos_dir=Path(palette_photos) if palette_photos else None,
         ortho_normalize=ortho_normalize,
         allow_overture_fallback=allow_overture_fallback,
+        cell_m=cell_m,
+        on_cell_fail=on_cell_fail,
     )
     meta = json.loads((gis_dir / "meta.json").read_text())
     stats = meta["stats"]
@@ -71,6 +75,27 @@ def run_gis_build(
     )
     for line in meta.get("attribution", []):
         console.print(f"[dim]{line}[/dim]")
+
+
+def run_gis_cells(bbox_text: str, source: str, cell_m: float) -> None:
+    from dronecv.gis.geometry import parse_bbox
+    from dronecv.gis.parcel_cache import CellCache
+    from dronecv.gis.parcels import cells_for_bbox
+
+    cells = cells_for_bbox(parse_bbox(bbox_text), cell_m)
+    version = "osm" if source == "osm" else "latest"
+    caches = {k: CellCache(f"{source}-{k}", version) for k in ("buildings", "landcover", "poi")}
+    rows = {}
+    for kind, cache in caches.items():
+        cached = sum(1 for c in cells if cache.has(c.id))
+        skipped = sum(1 for c in cells if cache.is_skipped(c.id))
+        rows[kind] = f"{cached} cached, {skipped} skipped, {len(cells) - cached - skipped} missing"
+    console.print(
+        metric_table(
+            f"Cell cache ({source}, {cell_m:.0f} m) — {len(cells)} cells in area",
+            {**rows, "cache_dir": str(CellCache(f"{source}-buildings", version).dir.parent.parent)},
+        )
+    )
 
 
 def run_gis_info(bbox_text: str) -> None:

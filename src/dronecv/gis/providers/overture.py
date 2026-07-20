@@ -207,8 +207,23 @@ def scan_files_parallel(index: _FooterIndex, keys: list[str], bbox: BBox, worker
     return matches
 
 
-class OvertureBuildingsProvider:
+class _RegionScanMixin:
+    """`fetch_region(cells)`: one scan over the union of cells, bucketed into
+    per-cell results — so the cell orchestrator caches each 500 m cell without
+    re-scanning the parquet footers per cell (S3 has no rate limits, the cost
+    is the footer scan). `_kind` set by each provider."""
+
+    def fetch_region(self, cells):
+        from dronecv.gis.parcel_fetch import bucket_by_cell
+        from dronecv.gis.parcels import cells_bbox
+
+        return bucket_by_cell(self._kind, self.fetch(cells_bbox(cells)), cells)
+
+
+class OvertureBuildingsProvider(_RegionScanMixin):
     """`.fetch(bbox) -> list[Building]` — drop-in for OverpassBuildings."""
+
+    _kind = "buildings"
 
     def __init__(self, release: str | None = None, cache_dir: Path | None = None):
         self.release = release
@@ -277,8 +292,10 @@ GREEN_OF_OVERTURE = {
 }
 
 
-class OvertureLandcoverProvider:
+class OvertureLandcoverProvider(_RegionScanMixin):
     """Water polygons + road segments + green/forest areas from Overture."""
+
+    _kind = "landcover"
 
     def __init__(self, release: str | None = None):
         self.release = release
@@ -355,10 +372,12 @@ ARCHETYPE_OF_CATEGORY = [
 ]
 
 
-class OverturePoiProvider:
+class OverturePoiProvider(_RegionScanMixin):
     """POIs from the Overture `places` theme -> (Poi, []) — same contract as
     OverpassPoi, so archetype stamping, building matching and Wikimedia photo
     fetch work unchanged. Overture has no building:part geometries."""
+
+    _kind = "poi"
 
     def __init__(self, release: str | None = None):
         self.release = release

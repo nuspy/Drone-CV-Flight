@@ -249,3 +249,120 @@ def _fallback_one(kind, cell, fallback_provider, fallback_cache, status):
     if fallback_cache:
         fallback_cache.put(cell.id, _dump(kind, result))
     return result
+
+
+# ---------------------------------------------------- pipeline-facing glue
+
+def bucket_by_cell(kind: str, result, cells: list[Cell]) -> dict:
+    """Assign each feature to the grid cell containing its centroid — lets a
+    provider fetch a whole region once and fill per-cell caches (Overture).
+    Returns {cell_id: per-cell-result}."""
+    from dronecv.gis.parcels import cell_of
+
+    ids = {c.id for c in cells}
+    cm = cells[0].cell_m if cells else 500.0
+
+    def assign(out, pts, feat):
+        if not pts:
+            return
+        clon = sum(p[0] for p in pts) / len(pts)
+        clat = sum(p[1] for p in pts) / len(pts)
+        cid = cell_of(clat, clon, cm).id
+        if cid in ids:
+            out[cid].append(feat)
+
+    if kind == "poi":
+        out: dict = {c.id: ([], []) for c in cells}
+        pois, parts = result
+        for p in pois:
+            cid = cell_of(p.lonlat[1], p.lonlat[0], cm).id
+            if cid in ids:
+                out[cid][0].append(p)
+        for pt in parts:
+            pts = pt.footprint_lonlat
+            clon = sum(x[0] for x in pts) / len(pts)
+            clat = sum(x[1] for x in pts) / len(pts)
+            cid = cell_of(clat, clon, cm).id
+            if cid in ids:
+                out[cid][1].append(pt)
+        return out
+
+    out = {c.id: [] for c in cells}
+    for f in result:
+        pts = f.footprint_lonlat if kind == "buildings" else (f.ring_lonlat or f.line_lonlat)
+        assign(out, pts, f)
+    return out
+
+
+def source_identity(provider) -> tuple[str, str]:
+    """(source_name, source_version) for cache keying. Overpass -> ('osm',
+    'osm'); Overture -> ('overture', release or 'latest')."""
+    from dronecv.gis.providers.buildings import OverpassBuildings
+    from dronecv.gis.providers.landcover import OverpassLandcover
+    from dronecv.gis.providers.poi import OverpassPoi
+
+    if isinstance(provider, (OverpassBuildings, OverpassLandcover, OverpassPoi)):
+        return "osm", "osm"
+    return "overture", str(getattr(provider, "release", None) or "latest")
+
+
+def opposite_provider(kind: str, provider):
+    """Build the other-source provider for a FALLBACK decision."""
+    to_overture = source_identity(provider)[0] == "osm"
+    import dronecv.gis.providers.overture as ov
+    from dronecv.gis.providers import buildings as ob
+    from dronecv.gis.providers import landcover as ol
+    from dronecv.gis.providers import poi as op
+
+    if kind == "buildings":
+        return ov.OvertureBuildingsProvider() if to_overture else ob.OverpassBuildings()
+    if kind == "landcover":
+        return ov.OvertureLandcoverProvider() if to_overture else ol.OverpassLandcover()
+    if kind == "poi":
+        return ov.OverturePoiProvider() if to_overture else op.OverpassPoi()
+    raise ValueError(kind)
+
+
+def policy_decider(on_cell_fail: str) -> Callable[[Cell, Exception, str], Decision]:
+    """Non-interactive decision policy from a flag (CLI / headless builds)."""
+    mapping = {
+        "defer": Decision.DEFER, "skip": Decision.SKIP,
+        "abort": Decision.ABORT, "fallback": Decision.FALLBACK,
+    }
+    if on_cell_fail not in mapping:
+        raise ValueError(f"on_cell_fail must be one of {sorted(mapping)}")
+    choice = mapping[on_cell_fail]
+    return lambda cell, err, sig: choice
+
+
+def fetch_vector(
+    kind: str,
+    provider,
+    bbox,
+    cell_m: float = 500.0,
+    cache_root=None,
+    decide: Callable[[Cell, Exception, str], Decision] | None = None,
+    on_status: Callable[[Cell, str], None] | None = None,
+):
+    """Cell-based fetch of one vector kind for an AOI bbox. Returns
+    (merged_result, CellReport). Handles cache setup, the FALLBACK provider,
+    and boundary dedup — the pipeline's single entry point."""
+    from dronecv.gis.parcel_cache import CellCache
+    from dronecv.gis.parcels import cells_for_bbox
+
+    cells = cells_for_bbox(bbox, cell_m)
+    name, version = source_identity(provider)
+    # The cache dir is keyed by KIND too, else buildings/landcover/poi under
+    # the same source ('osm') would collide on identical cell filenames.
+    cache = CellCache(f"{name}-{kind}", version, root=cache_root)
+
+    fb_provider = opposite_provider(kind, provider)
+    fb_name, fb_version = source_identity(fb_provider)
+    fb_cache = CellCache(f"{fb_name}-{kind}", fb_version, root=cache_root)
+
+    per_cell, report = fetch_cells(
+        kind, cells, provider, version, cache, decide=decide,
+        fallback_provider=fb_provider, fallback_source_version=fb_version,
+        fallback_cache=fb_cache, on_status=on_status,
+    )
+    return merge_dedup(kind, per_cell), report

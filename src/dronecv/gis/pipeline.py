@@ -49,45 +49,6 @@ class BuildSources:
     poi: object | None = None  # OverpassPoi (optional: POIs/landmarks/parts)
 
 
-def _fetch_buildings_resilient(
-    sources: BuildSources, bbox: BBox, meta, allow_overture_fallback: bool = False
-) -> list:
-    """Fetch buildings. If the source is Overpass and it fails entirely
-    (public mirrors flaky under load: 504 / read timeouts):
-
-    - `allow_overture_fallback=True` → switch the whole OSM-sourced set
-      (buildings + landcover + POIs) to Overture Maps and continue;
-    - otherwise (DEFAULT) → re-raise a clear, actionable error. No silent
-      source switch: the user stays in control of which data source is used.
-    """
-    try:
-        return sources.buildings.fetch(bbox)
-    except Exception as e:  # noqa: BLE001
-        if not isinstance(sources.buildings, OverpassBuildings):
-            raise
-        if not allow_overture_fallback:
-            raise RuntimeError(
-                f"OpenStreetMap/Overpass is unavailable ({e}). The public "
-                "Overpass servers are overloaded (504) — try again shortly, or "
-                "switch the buildings source to Overture (GUI: Buildings -> "
-                "overture; CLI: pass Overture sources / --allow-overture-fallback)."
-            ) from e
-        log.warning(f"Overpass unavailable ({e}); falling back to Overture Maps for "
-                    "buildings + landcover + POIs (--allow-overture-fallback)")
-        from dronecv.gis.providers.overture import (
-            OvertureBuildingsProvider,
-            OvertureLandcoverProvider,
-            OverturePoiProvider,
-        )
-
-        sources.buildings = OvertureBuildingsProvider()
-        sources.landcover = OvertureLandcoverProvider()
-        sources.poi = OverturePoiProvider()
-        buildings = sources.buildings.fetch(bbox)
-        meta.stats["buildings_fallback"] = "overture"
-        return buildings
-
-
 def build_environment(
     bbox: BBox,
     env_name: str,
@@ -105,6 +66,10 @@ def build_environment(
     palette_photos_dir: Path | None = None,
     ortho_normalize: bool = True,
     allow_overture_fallback: bool = False,
+    cell_m: float = 500.0,
+    on_cell_fail: str = "defer",
+    decide=None,
+    cache_root: Path | None = None,
 ) -> Path:
     """`reconstruct_buildings` extracts extra footprints from imagery and
     merges them where GIS vectors have nothing (see
@@ -170,8 +135,21 @@ def build_environment(
             max_ground = max(max_ground, float(elev.max() - ground_alt0))
     meta.ground_alt0 = float(ground_alt0 or 0.0)
 
+    # ---- vector data cell by cell (standardized 500 m grid + cache) ----
+    from dronecv.gis.parcel_fetch import fetch_vector, policy_decider
+
+    if decide is None:  # non-interactive (CLI/headless): policy from the flag
+        policy = "fallback" if allow_overture_fallback else on_cell_fail
+        decide = policy_decider(policy)
+    cell_reports = []
+
+    def _celled(kind, provider):
+        result, rep = fetch_vector(kind, provider, bbox, cell_m, cache_root, decide)
+        cell_reports.append(rep)
+        return result
+
     # ---- buildings: fetch, resolve heights (tags -> shadows -> defaults) ----
-    buildings = _fetch_buildings_resilient(sources, bbox, meta, allow_overture_fallback)
+    buildings = _celled("buildings", sources.buildings)
     ortho = sources.ortho
     if ortho is None and ortho_path is not None:
         from dronecv.gis.providers.imagery import load_geotiff_ortho
@@ -253,7 +231,7 @@ def build_environment(
     if ortho is not None:
         n_shadow = estimate_heights_from_shadows(buildings, anchor, ortho)
 
-    landcover = sources.landcover.fetch(bbox)
+    landcover = _celled("landcover", sources.landcover)
     rasterize_landcover(store, anchor, landcover)
     # Flatten water to a single level: the 30 m DSM is noisy over rivers and
     # renders as blocky waves that visually drown the scene.
@@ -295,7 +273,7 @@ def build_environment(
             stamp_building_parts,
         )
 
-        pois, parts = sources.poi.fetch(bbox)
+        pois, parts = _celled("poi", sources.poi)
         n_parts = stamp_building_parts(store, anchor, parts)
         pairs = match_pois_to_buildings(anchor, pois, buildings)
         n_arch = stamp_archetypes(store, anchor, pairs)
@@ -305,6 +283,26 @@ def build_environment(
 
             photos = fetch_commons_photos(pois, gis_dir / "photos")
             poi_stats["n_photos"] = len(photos)
+
+    # ---- per-cell download manifest (status + deferred, for resume/retry) ----
+    import json as _jsonm
+
+    deferred = sorted({c for r in cell_reports for c in r.deferred})
+    manifest = {
+        "cell_m": cell_m,
+        "reports": [r.summary() for r in cell_reports],
+        "deferred": deferred,
+    }
+    (gis_dir / "download_manifest.json").write_text(_jsonm.dumps(manifest, indent=1))
+    n_total_cells = cell_reports[0].n_total if cell_reports else 0
+    meta.stats["cells"] = {"cell_m": cell_m, "n_cells": n_total_cells,
+                           "n_deferred": len(deferred)}
+    if deferred:
+        log.warning(
+            f"{len(deferred)}/{n_total_cells} cells could not be downloaded and were "
+            f"deferred — re-run the build to resume (cached cells are skipped), or "
+            f"`dronecv gis cells --retry {env_name}`."
+        )
 
     # ---- 3D territory features: forests, bridges, rail embankments ----
     from dronecv.gis.vegetation import (
