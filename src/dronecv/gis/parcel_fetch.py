@@ -190,11 +190,7 @@ def fetch_cells(
         status(cell, "fetching")
         try:
             result = provider.fetch(cell.bbox)
-            cache.put(cell.id, _dump(kind, result))
-            per_cell.append(result)
-            report.fetched.append(cell.id)
-            status(cell, "fetched")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — a FETCH failure -> decide
             sig = _err_signature(e)
             d = decide(cell, e, sig)
             if d == Decision.ABORT:
@@ -216,6 +212,22 @@ def fetch_cells(
                 report.failed[cell.id] = str(e)
                 per_cell.append(_empty(kind))
                 status(cell, "deferred")
+        else:
+            # Fetch SUCCEEDED. Persist best-effort: a cache-write failure must
+            # never masquerade as a fetch failure (which would defer + discard
+            # good data and force a re-download next run). Use the data anyway.
+            try:
+                cache.put(cell.id, _dump(kind, result))
+            except Exception as ce:  # noqa: BLE001
+                log.warning(f"cell {cell.id} fetched but could NOT be cached "
+                            f"({ce}); it will be refetched next run. Cache dir: {cache.dir}")
+            per_cell.append(result)
+            report.fetched.append(cell.id)
+            status(cell, "fetched")
+    n_reuse = len(report.cached) + len(report.skipped)
+    if n_reuse:
+        log.info(f"cells[{kind}]: resumed {n_reuse}/{report.n_total} from cache "
+                 f"(dir: {cache.dir})")
     log.info(f"cells[{kind}]: {report.summary()}")
     return per_cell, report
 

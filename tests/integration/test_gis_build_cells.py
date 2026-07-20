@@ -93,3 +93,28 @@ def test_skip_marks_cell_and_second_build_is_cached(tmp_path):
         sources=_sources(fresh), res_m=2.0, cache_root=cache,
     )
     assert calls["n"] == 0  # every cell served from the shared cache
+
+
+def test_default_cache_root_resumes_across_runs(tmp_path):
+    # The GUI/CLI build with cache_root=None (the DEFAULT). conftest points
+    # DRONECV_CACHE_DIR at a tmp dir, so this exercises the default-path resume
+    # exactly as a real second run would (no explicit cache_root threaded in).
+    build_environment(
+        BBOX, "d1", out_root=tmp_path / "a", configs_root=tmp_path,
+        sources=_sources(OverpassBuildings(fixture_path=FIXTURES / "overpass_buildings.json")),
+        res_m=2.0,  # cache_root omitted -> default_cache_root()
+    )
+    calls = {"n": 0}
+    orig = OverpassBuildings.fetch
+
+    def counting(self, bbox):
+        calls["n"] += 1
+        return orig(self, bbox)
+
+    fresh = OverpassBuildings(fixture_path=FIXTURES / "overpass_buildings.json")
+    fresh.fetch = counting.__get__(fresh, OverpassBuildings)
+    build_environment(
+        BBOX, "d2", out_root=tmp_path / "b", configs_root=tmp_path,
+        sources=_sources(fresh), res_m=2.0,
+    )
+    assert calls["n"] == 0  # default-root cache reused on the next run

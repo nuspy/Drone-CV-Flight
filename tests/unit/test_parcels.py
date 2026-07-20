@@ -209,6 +209,26 @@ class TestPartialCellRetry:
         assert cells[1].id not in prov2.calls           # cached, skipped
         assert cells[0].id in rep.deferred
 
+    def test_cache_write_failure_does_not_defer_a_good_fetch(self, tmp_path):
+        # A SUCCESSFUL fetch whose cache write fails must still be USED and
+        # reported as fetched (not deferred) — otherwise good data is discarded
+        # and re-downloaded every run (the reported resume bug).
+        cells = cells_for_bbox(BBox(47.500, 19.040, 47.503, 19.043))
+        cache = CellCache("osm-buildings", "osm", root=tmp_path)
+
+        def boom(cell_id, obj):
+            raise OSError("disk full / permission denied")
+
+        cache.put = boom  # every cache write fails
+        deferred = []
+        per_cell, rep = fetch_cells(
+            "buildings", cells, _Provider(), "osm", cache,
+            decide=lambda c, e, s: deferred.append(c.id) or Decision.DEFER,
+        )
+        assert rep.fetched == [c.id for c in cells]  # all fetched, used
+        assert rep.deferred == [] and deferred == []  # none deferred by a cache error
+        assert all(len(r) == 1 for r in per_cell)     # the fetched data is returned
+
     def test_skip_is_final(self, tmp_path):
         cells = cells_for_bbox(BBox(47.500, 19.040, 47.503, 19.043))
         cache = CellCache("osm-buildings", "osm", root=tmp_path)
