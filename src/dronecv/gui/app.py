@@ -184,6 +184,8 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.setWindowTitle("DroneCV — GIS environment builder")
             self.resize(1280, 800)
             self.state = GuiState()
+            self._cov_workers: list = []
+            self._cov_generation = 0
 
             # ---- left panel ----
             panel = QWidget()
@@ -282,12 +284,39 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         def on_mask(self, geojson: str) -> None:
             bbox = self.state.set_mask(geojson)
             self.status.setText(
-                f"area: {bbox.south:.4f},{bbox.west:.4f} → {bbox.north:.4f},{bbox.east:.4f} — checking coverage…"
+                f"area: {bbox.south:.4f},{bbox.west:.4f} → {bbox.north:.4f},{bbox.east:.4f} — "
+                "checking coverage (OSM + Overture + Sentinel-2, can take ~1 min)…"
             )
-            self.cov_worker = CoverageWorker(bbox)
-            self.cov_worker.done.connect(self.on_coverage)
-            self.cov_worker.failed.connect(lambda e: self.status.setText(f"coverage failed: {e}"))
-            self.cov_worker.start()
+            # A redraw while a previous check is still running must NOT
+            # destroy that thread (Qt aborts the whole app): keep every
+            # worker referenced until it finishes, and use a generation
+            # counter so only the LATEST result updates the panel.
+            self._cov_generation += 1
+            gen = self._cov_generation
+            worker = CoverageWorker(bbox)
+            self._cov_workers.append(worker)
+            worker.done.connect(
+                lambda rep, g=gen: self.on_coverage(rep) if g == self._cov_generation else None
+            )
+            worker.failed.connect(
+                lambda e, g=gen: self.status.setText(f"coverage failed: {e}")
+                if g == self._cov_generation else None
+            )
+            worker.finished.connect(lambda w=worker: self._drop_worker(w))
+            worker.start()
+
+        def _drop_worker(self, worker) -> None:
+            if worker in self._cov_workers:
+                self._cov_workers.remove(worker)
+
+        def closeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+            # Give running coverage threads a moment; then detach hard so a
+            # long network call cannot block the window from closing.
+            for w in list(self._cov_workers):
+                if not w.wait(1500):
+                    w.terminate()
+                    w.wait(500)
+            super().closeEvent(event)
 
         def on_buildings_source(self, text: str) -> None:
             self.state.selected_sources["buildings"] = text
