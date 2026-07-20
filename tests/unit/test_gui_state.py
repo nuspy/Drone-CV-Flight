@@ -72,3 +72,50 @@ def test_build_kwargs():
     assert kw["res_m"] == 2.0
     assert kw["ortho_utc"].year == 2026
     assert kw["ortho_path"] is None
+
+
+def test_source_selection_and_build_kwargs():
+    st = GuiState()
+    st.set_mask(_rect_geojson(43.31, 11.32, 43.33, 11.35))
+    st.env_name = "x"
+    # Overture wins when it has more buildings; s2 auto-picked when available.
+    st.apply_coverage({
+        "dem": {"coverage": 1.0},
+        "buildings": {"available": True, "n_buildings": 100, "height_coverage": 0.2},
+        "buildings_overture": {"available": True, "n_buildings": 900, "height_coverage": 0.6},
+        "imagery_s2": {"available": True, "n_recent_scenes": 12},
+        "recommended": {"dem": "copernicus_glo30", "buildings": "overture",
+                        "heights": "tags", "imagery": "s2"},
+    })
+    assert st.selected_sources["buildings"] == "overture"
+    assert st.imagery == "s2"
+    kw = st.build_kwargs()
+    assert kw["imagery"] == "s2"
+    from dronecv.gis.providers.overture import OvertureBuildingsProvider
+
+    assert isinstance(kw["sources"].buildings, OvertureBuildingsProvider)
+    assert kw["sources"].poi is not None
+
+
+def test_build_kwargs_defaults_osm_no_sources():
+    st = GuiState()
+    st.set_mask(_rect_geojson(43.31, 11.32, 43.33, 11.35))
+    st.env_name = "x"
+    kw = st.build_kwargs()
+    assert "sources" not in kw          # OSM path uses the pipeline defaults
+    assert kw["imagery"] is None        # "none" maps to no imagery
+    assert kw["reconstruct_buildings"] is False
+
+
+def test_coverage_recommendation_prefers_reachable_source():
+    from dronecv.gis.coverage import coverage_report  # noqa: F401 (import check)
+    # Pure-logic check of the preference rule mirrored in apply_coverage:
+    st = GuiState()
+    st.set_mask(_rect_geojson(43.31, 11.32, 43.33, 11.35))
+    st.apply_coverage({
+        "dem": {"coverage": 1.0},
+        "buildings": {"available": False, "n_buildings": 0, "height_coverage": 0.0},
+        "recommended": {"dem": "copernicus_glo30", "buildings": "overture",
+                        "heights": "shadow+defaults"},
+    })
+    assert st.selected_sources["buildings"] == "overture"

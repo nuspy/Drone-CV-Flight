@@ -35,6 +35,9 @@ class GuiState:
     res_m: float = 1.0
     ortho_path: str | None = None
     ortho_utc: str | None = None
+    imagery: str = "none"  # none | s2 | eox
+    reconstruct: bool = False
+    palette_photos: str | None = None
 
     def set_mask(self, geojson_text: str) -> BBox:
         gj = json.loads(geojson_text)
@@ -56,6 +59,8 @@ class GuiState:
             "buildings": rec.get("buildings") or "osm_overpass",
             "heights": rec.get("heights") or "shadow+defaults",
         }
+        if rec.get("imagery") and self.imagery == "none":
+            self.imagery = rec["imagery"]
         return self.selected_sources
 
     def can_build(self) -> tuple[bool, str]:
@@ -70,13 +75,32 @@ class GuiState:
         return True, "ready"
 
     def build_kwargs(self) -> dict:
-        return {
+        kwargs = {
             "bbox": self.bbox,
             "env_name": self.env_name.strip(),
             "res_m": self.res_m,
             "ortho_path": Path(self.ortho_path) if self.ortho_path else None,
             "ortho_utc": datetime.fromisoformat(self.ortho_utc) if self.ortho_utc else None,
+            "imagery": None if self.imagery == "none" else self.imagery,
+            "reconstruct_buildings": self.reconstruct,
+            "palette_photos_dir": Path(self.palette_photos) if self.palette_photos else None,
         }
+        if self.selected_sources.get("buildings") == "overture":
+            from dronecv.gis.pipeline import BuildSources
+            from dronecv.gis.providers.dem import CopernicusDem
+            from dronecv.gis.providers.overture import (
+                OvertureBuildingsProvider,
+                OvertureLandcoverProvider,
+                OverturePoiProvider,
+            )
+
+            kwargs["sources"] = BuildSources(
+                dem=CopernicusDem(),
+                buildings=OvertureBuildingsProvider(),
+                landcover=OvertureLandcoverProvider(),
+                poi=OverturePoiProvider(),
+            )
+        return kwargs
 
 
 def run_gui() -> None:  # pragma: no cover - requires a display
@@ -86,6 +110,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         from PySide6.QtWebEngineWidgets import QWebEngineView
         from PySide6.QtWidgets import (
             QApplication,
+            QCheckBox,
             QComboBox,
             QDoubleSpinBox,
             QFormLayout,
@@ -183,10 +208,26 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.dem_combo.addItems(["copernicus_glo30"])
             cfg_form.addRow("DEM", self.dem_combo)
             self.bld_combo = QComboBox()
-            self.bld_combo.addItems(["osm_overpass"])
+            self.bld_combo.addItems(["osm_overpass", "overture"])
+            self.bld_combo.currentTextChanged.connect(self.on_buildings_source)
             cfg_form.addRow("Buildings", self.bld_combo)
             self.heights_label = QLabel("—")
             cfg_form.addRow("Heights", self.heights_label)
+            self.imagery_combo = QComboBox()
+            self.imagery_combo.addItems([
+                "none",
+                "s2 (Sentinel-2 cloud-free, 10 m)",
+                "eox (Sentinel-2 mosaic, non-commercial)",
+            ])
+            self.imagery_combo.currentIndexChanged.connect(self._refresh_ready)
+            cfg_form.addRow("Imagery", self.imagery_combo)
+            self.reconstruct_check = QCheckBox("reconstruct buildings from imagery")
+            self.reconstruct_check.stateChanged.connect(self._refresh_ready)
+            cfg_form.addRow("", self.reconstruct_check)
+            self.palette_edit = QLineEdit(
+                placeholderText="folder of area photos for the color palette (optional)"
+            )
+            cfg_form.addRow("Palette photos", self.palette_edit)
             form.addLayout(cfg_form)
 
             self.coverage_view = QPlainTextEdit(readOnly=True, maximumBlockCount=400)
@@ -220,6 +261,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.setCentralWidget(split)
 
             self.env_edit.textChanged.connect(self._refresh_ready)
+            self.palette_edit.textChanged.connect(self._refresh_ready)
 
         # ------------------------------------------------------------ handlers
 
@@ -247,17 +289,40 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.cov_worker.failed.connect(lambda e: self.status.setText(f"coverage failed: {e}"))
             self.cov_worker.start()
 
+        def on_buildings_source(self, text: str) -> None:
+            self.state.selected_sources["buildings"] = text
+            self._refresh_ready()
+
         def on_coverage(self, report: dict) -> None:
             selected = self.state.apply_coverage(report)
             self.heights_label.setText(selected["heights"])
+            self.bld_combo.setCurrentText(selected["buildings"] or "osm_overpass")
+            if self.state.imagery == "s2":
+                self.imagery_combo.setCurrentIndex(1)
             dem = report["dem"]
-            bld = report["buildings"]
+            osm = report["buildings"]
+            ovt = report.get("buildings_overture", {})
+            s2 = report.get("imagery_s2", {})
+            osm_line = (
+                f"OSM/Overpass: {osm['n_buildings']} buildings "
+                f"({osm['height_coverage']:.0%} tagged heights)"
+                if osm.get("available") else "OSM/Overpass: UNREACHABLE from this network"
+            )
+            ovt_line = (
+                f"Overture {ovt.get('release', '')}: {ovt.get('n_buildings', 0)} buildings "
+                f"({ovt.get('height_coverage', 0.0):.0%} with heights)"
+                if ovt.get("available") else "Overture: unavailable"
+            )
+            s2_line = (
+                f"Sentinel-2 tile {s2.get('tile')}: {s2.get('n_recent_scenes', 0)} recent "
+                f"scenes (newest {s2.get('newest')}) — cloud-free compositing available"
+                if s2.get("available") else "Sentinel-2: unavailable"
+            )
             self.coverage_view.setPlainText(
                 f"DEM tiles available: {dem['available']}/{len(dem['tiles'])}\n"
-                f"Buildings: {bld['n_buildings']} "
-                f"({bld['height_coverage']:.0%} with tagged heights, "
-                f"median {bld.get('median_height_m') or '—'} m)\n"
-                f"Recommended heights strategy: {selected['heights']}\n\n"
+                f"{osm_line}\n{ovt_line}\n{s2_line}\n"
+                f"Recommended: buildings={selected['buildings']}, "
+                f"heights={selected['heights']}\n\n"
                 + json.dumps(report, indent=1)
             )
             self._refresh_ready()
@@ -265,6 +330,10 @@ def run_gui() -> None:  # pragma: no cover - requires a display
         def _refresh_ready(self) -> None:
             self.state.env_name = self.env_edit.text()
             self.state.res_m = float(self.res_spin.value())
+            self.state.imagery = self.imagery_combo.currentText().split(" ")[0]
+            self.state.reconstruct = self.reconstruct_check.isChecked()
+            self.state.palette_photos = self.palette_edit.text().strip() or None
+            self.state.selected_sources["buildings"] = self.bld_combo.currentText()
             ok, why = self.state.can_build()
             self.build_btn.setEnabled(ok)
             self.status.setText(why)
