@@ -68,7 +68,10 @@ class SingleShotLocalizer:
         self.target_err_m = target_err_m
 
     def localize(self, image_rgb: np.ndarray) -> PhotoFix:
+        from dronecv.vision.preprocess_filter import apply_filter
+
         arr = preprocess(image_rgb, self.width, self.height)
+        arr = apply_filter(arr, self.bundle.filter_spec)
         img = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)
         with torch.no_grad():
             desc = self.bundle.embed_net(img)[0].numpy()

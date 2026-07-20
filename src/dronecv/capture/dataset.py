@@ -143,12 +143,18 @@ class TorchCaptureView(Dataset):
     With augment=True applies photometric jitter (brightness/contrast/channel
     gain + noise) — pose-preserving, so labels are untouched; it markedly
     reduces APR overfitting on small capture sets.
+
+    `filter_spec` applies the shared domain-gap preprocessing filter AFTER
+    the jitter — mirroring inference, where the filter sees the raw photo
+    with all its photometric variation.
     """
 
-    def __init__(self, ds: CaptureDataset, indices: list[int], augment: bool = False, seed: int = 0):
+    def __init__(self, ds: CaptureDataset, indices: list[int], augment: bool = False,
+                 seed: int = 0, filter_spec=None):
         self.ds = ds
         self.indices = list(indices)
         self.augment = augment
+        self.filter_spec = filter_spec
         self._gen = np.random.default_rng(seed)
 
     def __len__(self) -> int:
@@ -165,6 +171,10 @@ class TorchCaptureView(Dataset):
             arr = arr * g.uniform(0.92, 1.08, size=(1, 1, 3))
             arr = arr + g.normal(0.0, 0.02, size=arr.shape)
             arr = np.clip(arr, 0.0, 1.0).astype(np.float32)
+        if self.filter_spec is not None:
+            from dronecv.vision.preprocess_filter import apply_filter
+
+            arr = apply_filter(arr, self.filter_spec)
         img = torch.from_numpy(np.ascontiguousarray(arr)).permute(2, 0, 1)
         pos = torch.tensor(rec["pos_enu"], dtype=torch.float32)
         h = np.radians(rec["heading_deg"])

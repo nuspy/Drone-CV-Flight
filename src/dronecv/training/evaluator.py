@@ -45,7 +45,7 @@ def evaluate_bundle(
     """Returns a metrics dict; optionally fits and installs the sigma scale."""
     if not eval_indices:
         return {"n_eval": 0}
-    view = TorchCaptureView(ds, eval_indices)
+    view = TorchCaptureView(ds, eval_indices, filter_spec=bundle.filter_spec)
     imgs = torch.stack([view[i][0] for i in range(len(view))])
     gt_pos = ds.positions_enu()[eval_indices]
     gt_heading = ds.headings_deg()[eval_indices]

@@ -46,13 +46,18 @@ class TiledLocalizer:
         self.coarse_net.load_state_dict(torch.load(coarse_dir / "embed.pt", weights_only=True))
         self.coarse_net.eval()
         self.coarse_db = LandmarkDB.load(coarse_dir / "landmark_db.npz")
+        self._manifest = manifest
         self.anchor = anchor or GeoAnchor.from_dict(manifest["anchor"])
         self._lru: OrderedDict[str, Localizer] = OrderedDict()
         self._lru_max = lru
         self.current_tile: str | None = None
 
     def _coarse_fix(self, rgb: np.ndarray) -> np.ndarray:
-        img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float().unsqueeze(0) / 255.0
+        from dronecv.vision.preprocess_filter import FilterSpec, apply_filter
+
+        spec = FilterSpec.from_dict(getattr(self, "_manifest", {}).get("preprocess_filter"))
+        arr = apply_filter(rgb.astype(np.float32) / 255.0, spec)
+        img = torch.from_numpy(np.ascontiguousarray(arr)).permute(2, 0, 1).unsqueeze(0)
         with torch.no_grad():
             desc = self.coarse_net(img)[0].numpy()
         return np.asarray(self.coarse_db.query(desc, topk=5)["pos_enu"], dtype=float)

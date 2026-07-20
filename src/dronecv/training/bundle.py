@@ -44,6 +44,14 @@ class ModelBundle:
     def calibration_scale(self) -> float:
         return float(self.manifest.get("calibration", {}).get("apr_sigma_scale", 1.0))
 
+    @property
+    def filter_spec(self):
+        """The domain-gap preprocessing filter the models were trained with.
+        Every inference path MUST apply exactly this to its inputs."""
+        from dronecv.vision.preprocess_filter import FilterSpec
+
+        return FilterSpec.from_dict(self.manifest.get("preprocess_filter"))
+
     def save(self, out_dir: Path) -> None:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)

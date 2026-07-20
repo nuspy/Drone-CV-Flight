@@ -95,6 +95,12 @@ class TrainingConfig(StrictModel):
     val_cell_m: float = 50.0
     val_fraction: float = 0.15
     num_workers: int = 2
+    # Shared domain-gap preprocessing (see dronecv.vision.preprocess_filter):
+    # applied to training images AND recorded in the bundle manifest so every
+    # inference path replays the identical transform.
+    filter_mode: str = "none"  # none | gray | edge | gray_edge
+    filter_edge_weight: float = 0.5
+    filter_clahe: bool = False
 
 
 class Thresholds(StrictModel):

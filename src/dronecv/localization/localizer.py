@@ -90,7 +90,10 @@ class Localizer:
         utc_dt = datetime.fromisoformat(utc)
         cues: dict[str, Any] = {}
 
-        img = torch.from_numpy(rgb.copy()).permute(2, 0, 1).float().unsqueeze(0) / 255.0
+        from dronecv.vision.preprocess_filter import apply_filter
+
+        arr = apply_filter(rgb.astype(np.float32) / 255.0, self.bundle.filter_spec)
+        img = torch.from_numpy(np.ascontiguousarray(arr)).permute(2, 0, 1).unsqueeze(0)
         with torch.no_grad():
             desc = self.bundle.embed_net(img)[0].numpy()
             apr = {k: v[0].numpy() if v.ndim else v for k, v in self.bundle.pose_net.predict(img).items()}

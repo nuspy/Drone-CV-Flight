@@ -54,7 +54,13 @@ def train_models(
         embed_net.load_state_dict(warm_start.embed_net.state_dict())
         pose_net.load_state_dict(warm_start.pose_net.state_dict())
 
-    view = TorchCaptureView(ds, train_idx, augment=True, seed=cfg.env.seed)
+    from dronecv.vision.preprocess_filter import FilterSpec
+
+    filter_spec = FilterSpec(
+        mode=t.filter_mode, edge_weight=t.filter_edge_weight, clahe=t.filter_clahe
+    )
+    view = TorchCaptureView(ds, train_idx, augment=True, seed=cfg.env.seed,
+                            filter_spec=filter_spec)
     last_stats: dict = {}
 
     # --- retrieval embedding: anchor+positive pair batches ---
@@ -116,7 +122,7 @@ def train_models(
 
     # Landmark DB from the training captures (clean images, no augmentation).
     embed_net.eval()
-    clean_view = TorchCaptureView(ds, train_idx, augment=False)
+    clean_view = TorchCaptureView(ds, train_idx, augment=False, filter_spec=filter_spec)
     imgs = torch.stack([clean_view[i][0] for i in range(len(clean_view))])
     embeddings = embed_images(embed_net, imgs.to(device))
     positions = ds.positions_enu()[train_idx]
@@ -143,6 +149,7 @@ def train_models(
             "pos_scale_m": pos_scale,
         },
         "dataset": {"n_captures": len(ds), "n_train": len(train_idx), "n_val": len(val_idx)},
+        "preprocess_filter": filter_spec.to_dict(),
         "calibration": {"apr_sigma_scale": 1.0},
         "metrics": {},
     }
