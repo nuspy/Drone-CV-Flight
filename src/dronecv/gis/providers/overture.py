@@ -63,34 +63,63 @@ def list_theme_files(release: str, theme: str, type_: str) -> list[str]:
 
 
 class _FooterIndex:
-    """Opens parquet footers over HTTP and yields row groups intersecting a bbox."""
+    """Parquet footer scan with exactly TWO HTTP range requests per file
+    (tail-8 for the footer length, then the footer itself) on a shared
+    keep-alive connection pool — generic fsspec+pyarrow access makes dozens
+    of small range reads per footer, which crawls behind CONNECT proxies."""
 
     def __init__(self):
+        import threading
+
+        import fsspec
+        import httpx
+
+        self.fs = fsspec.filesystem("https")  # used only for row-group data reads
+        self._local = threading.local()
+        self._httpx = httpx
+
+    def _client(self):
+        if not hasattr(self._local, "client"):
+            self._local.client = self._httpx.Client(timeout=60.0)
+        return self._local.client
+
+    def _thread_fs(self):
+        """fsspec HTTPFileSystem per thread: the sync wrapper owns an asyncio
+        loop, and sharing one instance across worker threads is fragile."""
         import fsspec
 
-        self.fs = fsspec.filesystem("https")
+        if not hasattr(self._local, "fs"):
+            self._local.fs = fsspec.filesystem("https", skip_instance_cache=True)
+        return self._local.fs
 
     def matching_row_groups(self, url: str, bbox: BBox) -> list[int]:
         import pyarrow.parquet as pq
 
+        # NOTE: keep this on the fsspec + ParquetFile path. A "faster" variant
+        # that fetched the raw footer bytes and called pq.read_metadata on a
+        # tail-only / sparse file SEGFAULTED pyarrow 25 on Overture footers.
         try:
-            with self.fs.open(url, "rb", block_size=256 * 1024) as fh:
+            with self._thread_fs().open(url, "rb", block_size=256 * 1024) as fh:
                 pf = pq.ParquetFile(fh)
-                idx = {c.path_in_schema: j for j, c in enumerate(pf.metadata.row_group(0).to_dict()["columns"])}
-                want = []
-                for rg in range(pf.metadata.num_row_groups):
-                    meta = pf.metadata.row_group(rg)
-                    xmin = meta.column(idx["bbox.xmin"]).statistics
-                    ymin = meta.column(idx["bbox.ymin"]).statistics
-                    xmax = meta.column(idx["bbox.xmax"]).statistics
-                    ymax = meta.column(idx["bbox.ymax"]).statistics
-                    if None in (xmin, ymin, xmax, ymax):
-                        want.append(rg)
-                        continue
-                    if (xmax.max >= bbox.west and xmin.min <= bbox.east
-                            and ymax.max >= bbox.south and ymin.min <= bbox.north):
-                        want.append(rg)
-                return want
+                meta_all = pf.metadata
+                rg0 = meta_all.row_group(0)
+            idx = {rg0.column(j).path_in_schema: j for j in range(rg0.num_columns)}
+            want = []
+            for rg in range(meta_all.num_row_groups):
+                meta = meta_all.row_group(rg)
+                xmin = meta.column(idx["bbox.xmin"]).statistics
+                ymin = meta.column(idx["bbox.ymin"]).statistics
+                xmax = meta.column(idx["bbox.xmax"]).statistics
+                ymax = meta.column(idx["bbox.ymax"]).statistics
+                # `is None` checks only: `None in (...)` invokes ==, which hits
+                # pyarrow Statistics.__eq__(None) and SEGFAULTS pyarrow 25.
+                if xmin is None or ymin is None or xmax is None or ymax is None:
+                    want.append(rg)
+                    continue
+                if (xmax.max >= bbox.west and xmin.min <= bbox.east
+                        and ymax.max >= bbox.south and ymin.min <= bbox.north):
+                    want.append(rg)
+            return want
         except Exception as e:  # noqa: BLE001
             log.warning(f"footer scan failed for {url.rsplit('/', 1)[-1]}: {e}")
             return []
@@ -98,7 +127,7 @@ class _FooterIndex:
     def read_rows(self, url: str, row_groups: list[int], columns: list[str], bbox: BBox):
         import pyarrow.parquet as pq
 
-        with self.fs.open(url, "rb", block_size=4 * 1024 * 1024) as fh:
+        with self.fs.open(url, "rb", block_size=32 * 1024 * 1024, cache_type="readahead") as fh:
             pf = pq.ParquetFile(fh)
             table = pf.read_row_groups(row_groups, columns=columns + ["bbox"])
         b = table.column("bbox").flatten()
@@ -124,18 +153,56 @@ def _wkb_rings(geom_wkb: bytes):
     return polys
 
 
-def scan_files_parallel(index: _FooterIndex, keys: list[str], bbox: BBox, workers: int = 16):
-    """Footer-scan many parquet files concurrently; returns [(key, row_groups)]."""
-    from concurrent.futures import ThreadPoolExecutor
+def _scan_chunk(args: tuple[list[str], tuple[float, float, float, float]]):
+    """Process-pool worker: scan a chunk of files with its OWN fsspec/pyarrow
+    state. Runs in a separate process because fsspec(https)+pyarrow footer
+    reads are not reliable across threads (native crashes observed); a crashed
+    worker only loses its chunk, which the parent retries sequentially."""
+    keys, (s, w, n, e) = args
+    bbox = BBox(s, w, n, e)
+    index = _FooterIndex()
+    out = []
+    for key in keys:
+        rgs = index.matching_row_groups(f"{BUCKET}/{key}", bbox)
+        if rgs:
+            out.append((key, rgs))
+    return out
 
-    def probe(key: str):
-        return key, index.matching_row_groups(f"{BUCKET}/{key}", bbox)
 
-    matches = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for key, rgs in pool.map(probe, keys):
-            if rgs:
-                matches.append((key, rgs))
+def scan_files_parallel(index: _FooterIndex, keys: list[str], bbox: BBox, workers: int = 6):
+    """Footer-scan many parquet files in crash-isolated worker processes."""
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    chunk = 8
+    chunks = [keys[i : i + chunk] for i in range(0, len(keys), chunk)]
+    bbox_t = (bbox.south, bbox.west, bbox.north, bbox.east)
+    matches: list = []
+    failed: list[list[str]] = []
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+        futures = {pool.submit(_scan_chunk, (c, bbox_t)): c for c in chunks}
+        from concurrent.futures import as_completed
+
+        done = 0
+        for fut in as_completed(futures):
+            try:
+                matches.extend(fut.result())
+            except Exception:  # noqa: BLE001 (incl. BrokenProcessPool)
+                failed.append(futures[fut])
+            done += 1
+            if done % 16 == 0:
+                log.info(f"footer scan {done}/{len(chunks)} chunks")
+    if failed:  # crashed chunks: retry file-by-file, still crash-isolated
+        retry_keys = [k for c in failed for k in c]
+        log.warning(f"retrying {len(retry_keys)} files from crashed workers")
+        with ProcessPoolExecutor(max_workers=2, mp_context=ctx) as pool:
+            futures = {pool.submit(_scan_chunk, ([k], bbox_t)): k for k in retry_keys}
+            for fut in as_completed(futures):
+                try:
+                    matches.extend(fut.result())
+                except Exception:  # noqa: BLE001
+                    log.warning(f"skipping unreadable file {futures[fut]}")
     log.info(f"{len(matches)} file(s) intersect the bbox")
     return matches
 
