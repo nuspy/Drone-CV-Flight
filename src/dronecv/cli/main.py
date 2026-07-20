@@ -191,12 +191,17 @@ def gis_build(
         None, "--palette-photos",
         help="Folder of photos of the area for roof/wall palette extraction",
     ),
+    ortho_normalize: bool = typer.Option(
+        True, "--ortho-normalize/--no-ortho-normalize",
+        help="Detect composite-mosaic strips in the imagery and align their "
+        "exposure/tone automatically (on by default)",
+    ),
 ) -> None:
     """Download DEM + buildings + landcover and build a flyable environment."""
     from dronecv.commands.gis_cmd import run_gis_build
 
     run_gis_build(place, bbox, mask, env_name, ortho, ortho_utc, res,
-                  reconstruct, imagery, imagery_res, palette_photos)
+                  reconstruct, imagery, imagery_res, palette_photos, ortho_normalize)
 
 
 @gis_app.command("info")

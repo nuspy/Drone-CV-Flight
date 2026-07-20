@@ -64,6 +64,7 @@ def build_environment(
     imagery: str | None = None,
     imagery_res_m: float = 10.0,
     palette_photos_dir: Path | None = None,
+    ortho_normalize: bool = True,
 ) -> Path:
     """`reconstruct_buildings` extracts extra footprints from imagery and
     merges them where GIS vectors have nothing (see
@@ -152,6 +153,14 @@ def build_environment(
             ortho = fetch_xyz_ortho(bbox, anchor, imagery[4:], zoom=zoom)
         else:
             raise ValueError(f"unknown imagery source '{imagery}' (use 'eox' or 'xyz:<template>')")
+
+    # Composite mosaics: detect radiometric strips and align them BEFORE any
+    # luminance/color consumer (reconstruction, palette, vegetation, shadows).
+    rad_stats = None
+    if ortho is not None and ortho_normalize:
+        from dronecv.gis.radiometry import normalize_zones
+
+        ortho, rad_stats = normalize_zones(ortho)
 
     n_reconstructed = 0
     if reconstruct_buildings:
@@ -249,6 +258,9 @@ def build_environment(
         "max_ground": max_ground,
         "n_shadow_heights": n_shadow,
         "n_reconstructed": n_reconstructed,
+        **({"radiometric_zones": {"n_zones": rad_stats.n_zones,
+                                  "corrections": rad_stats.corrections}}
+           if rad_stats is not None else {}),
         **height_stats(buildings),
         **b_stats,
         "n_landcover": len(landcover),

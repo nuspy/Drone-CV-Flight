@@ -19,6 +19,7 @@ def run_gis_build(
     imagery: str | None = None,
     imagery_res: float = 10.0,
     palette_photos: str | None = None,
+    ortho_normalize: bool = True,
 ) -> None:
     from dronecv.config import find_config_root
     from dronecv.gis.geometry import parse_bbox
@@ -47,6 +48,7 @@ def run_gis_build(
         imagery=imagery,
         imagery_res_m=imagery_res,
         palette_photos_dir=Path(palette_photos) if palette_photos else None,
+        ortho_normalize=ortho_normalize,
     )
     meta = json.loads((gis_dir / "meta.json").read_text())
     stats = meta["stats"]

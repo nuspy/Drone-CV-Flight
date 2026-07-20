@@ -77,6 +77,7 @@ tranne `--bbox`/`--place` e `--env-name`:
 | `--imagery eox` | Sentinel-2 cloudless come sorgente immagini (gratuito, ~10 m/px → solo strutture grandi) | quando non hai di meglio |
 | `--imagery "xyz:URL"` | tile XYZ ad alta risoluzione (~0.3-0.6 m/px) — i termini d'uso del provider sono responsabilità tua | ricostruzione seria |
 | `--ortho file.tif --ortho-utc …` | tua ortofoto georeferenziata **con data/ora di acquisizione** → altezze dalle ombre per gli edifici non taggati + palette tetti + spot verdi vegetazione | il singolo upgrade migliore se hai ortofoto regionali |
+| *(automatico)* `--no-ortho-normalize` per disattivare | le strisciate dei mosaici compositi (esposizione/tono diversi per acquisizione) vengono rilevate e allineate radiometricamente prima di ogni uso — lo stesso tetto è riconosciuto sia nella strisciata chiara che in quella scura | lascialo attivo; disattiva solo per immagini a acquisizione singola di cui ti fidi |
 | *(automatico)* | gli edifici senza altezza ereditano la mediana dei vicini taggati entro ~250 m; i POI stampano archetipi landmark (cupole, guglie, merlature); le classi verde+foresta OSM/Overture diventano chioma 3D | — |
 
 Il build termina con un riepilogo statistiche (edifici, altezze per

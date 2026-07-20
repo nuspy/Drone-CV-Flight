@@ -209,7 +209,11 @@ def building_mask(
     blur = cv2.GaussianBlur(g, (0, 0), max(1.0, 1.0 / ortho.res_m))
     win = max(15, int(150.0 / ortho.res_m) | 1)
     ref = cv2.boxFilter(blur, -1, (win, win))
-    cand = blur > ref + 0.10
+    # Threshold in LOCAL-dispersion units, not absolute: an exposure change
+    # (composite strips, haze) scales the contrast too, and a fixed +0.10
+    # would drop every roof in the darker strip. MAD ~ boxFilter of |dev|.
+    mad = cv2.boxFilter(np.abs(blur - ref), -1, (win, win))
+    cand = blur > ref + np.maximum(0.06, 2.5 * mad)
 
     k = max(3, int(3.0 / ortho.res_m) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))

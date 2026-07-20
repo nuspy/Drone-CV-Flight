@@ -49,6 +49,20 @@ from Overpass.
    tagged buildings within ~250 m (a fixed default flattens dense centers);
 5. per-class defaults (residential 7 m, industrial 9 m, landmark 25 m, …).
 
+## Composite mosaics: automatic radiometric normalization
+
+Satellite orthophotos are usually composites of strips acquired on different
+days — different exposure, tone and white balance, joined along sharp seams;
+the same roof reads bright in one strip and dark in the next. The build
+detects the radiometric zones automatically (per-block robust statistics;
+seams are sharp discontinuities, so gradual drifts never split) and aligns
+every zone to the dominant one (luminance shift+scale, per-channel gain,
+applied sharply at the seam — which is exactly what cancels it). On by
+default; `--no-ortho-normalize` disables it; zone count and corrections are
+recorded in `meta.json`. Downstream, footprint extraction thresholds are in
+local-dispersion units and the roof palette clusters in chromaticity, so
+residual exposure differences collapse onto the same material.
+
 ## Footprint reconstruction from imagery (`--reconstruct-buildings`)
 
 GIS vectors can have gaps (unmapped districts, new construction). With

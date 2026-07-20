@@ -68,6 +68,32 @@ def _kmeans(px: np.ndarray, k: int, iters: int = 25, seed: int = 0) -> list[tupl
     return [tuple(float(v) for v in centers[j]) for j in order if counts[j] > 0]
 
 
+def _kmeans_chromaticity(px: np.ndarray, k: int, seed: int = 0) -> list[tuple[float, ...]]:
+    """K-means in rg-chromaticity (lightness-invariant), representative RGB =
+    median of member pixels. The same roof material photographed under two
+    exposures (composite mosaic strips) lands in ONE cluster instead of two."""
+    gen = np.random.default_rng(seed)
+    s = px.sum(-1, keepdims=True) + 1e-6
+    chrom = px[:, :2] / s  # (r, g) normalized
+    centers = chrom[gen.choice(len(chrom), size=k, replace=False)]
+    lbl = np.zeros(len(chrom), dtype=int)
+    for _ in range(25):
+        d = ((chrom[:, None, :] - centers[None, :, :]) ** 2).sum(-1)
+        lbl = d.argmin(1)
+        for j in range(k):
+            m = lbl == j
+            if m.any():
+                centers[j] = chrom[m].mean(0)
+    counts = np.bincount(lbl, minlength=k)
+    order = np.argsort(-counts)
+    out = []
+    for j in order:
+        m = lbl == j
+        if m.any():
+            out.append(tuple(float(v) for v in np.median(px[m], axis=0)))
+    return out
+
+
 def _hsv(rgb: np.ndarray) -> np.ndarray:
     import cv2
 
@@ -145,5 +171,5 @@ def extract_palette(
     if len(walls) >= MIN_PIXELS:
         pal.wall = _kmeans(walls, k=3, seed=seed)
     if len(roofs) >= MIN_PIXELS:
-        pal.roof = _kmeans(roofs, k=3, seed=seed)
+        pal.roof = _kmeans_chromaticity(roofs, k=3, seed=seed)
     return pal

@@ -77,6 +77,7 @@ except `--bbox`/`--place` and `--env-name`:
 | `--imagery eox` | Sentinel-2 cloudless as the imagery source (free, ~10 m/px → only large structures) | when you have no better imagery |
 | `--imagery "xyz:URL"` | high-res XYZ tiles (~0.3-0.6 m/px) — you are responsible for the provider's terms of service | serious reconstruction |
 | `--ortho file.tif --ortho-utc …` | your own georeferenced orthophoto **with acquisition time** → shadow-based height inference for untagged buildings + roof palette + vegetation green-spots | best single upgrade if you have regional orthophotos |
+| *(automatic)* `--no-ortho-normalize` to disable | composite-mosaic strips (different exposure/tone per acquisition) are detected and radiometrically aligned before any use — the same roof is recognized whether its strip is bright or dark | leave on; disable only for single-acquisition imagery you trust |
 | *(automatic)* | untagged buildings inherit the median height of tagged neighbors within ~250 m; POIs stamp landmark archetypes (domes, spires, crenellations); Overture/OSM green+forest classes become 3D canopy | — |
 
 The build ends with a stats summary (buildings, heights by source,
