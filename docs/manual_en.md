@@ -19,12 +19,13 @@ open GIS data.
 
 | What | Notes |
 |---|---|
-| Python 3.11+ | `python --version` |
-| Project install | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]" -c constraints.txt` (use a venv; the constraints file pins tested versions and prevents pip resolver backtracking) |
-| GPU | optional — everything runs on CPU; CUDA makes training much faster |
+| Python **3.11 or 3.12** | `python --version` — 3.10 is NOT supported (the code uses 3.11+ features). On Windows: `py -3.12 -m venv .venv` then `.venv\Scripts\Activate.ps1` |
+| Project install | `git clone … && cd Drone-CV-Flight && pip install -e ".[dev,gis]" -c constraints.txt` (the constraints file pins tested versions and prevents pip resolver backtracking) |
+| Desktop GUI | extra install: `pip install -e ".[dev,gis,gui]" -c constraints.txt` (PySide6, ~500 MB) |
+| GPU | optional, auto-detected. No GPU → nothing to do, everything runs on CPU. NVIDIA GPU → `pip install torch --index-url https://download.pytorch.org/whl/cu124`; training then logs `training on cuda (…)` and runs 10-30× faster. GPU accelerates training/inference only — GIS build and coverage checks are network/CPU bound either way |
 | Blender 3.6+/4.x | only for the native `.blend` export (must be on `PATH`) |
 | Unity 2022.3+ | only for the Unity scene; install the **glTFast** package (`com.unity.cloud.gltfast`) for materials |
-| Network | Overpass/OSM works on normal networks (`--source osm` in scripts, default providers in `gis build`). On filtered networks (AWS-only proxies) use the Overture providers — data comes from public S3 |
+| Network | Overpass/OSM works on normal networks (with automatic mirror fallback). On filtered networks (AWS-only proxies) use the Overture / Sentinel-2 providers — their data comes from public S3 |
 | Disk | ~1 GB per built environment at 1 m/px (2×2 km); training datasets add a few hundred MB |
 
 Every command below is run from the repository root, with the virtualenv
@@ -34,25 +35,42 @@ active (`dronecv` is installed as a console script by `pip install -e`).
 
 ## Part A — High-quality 3D export, end to end
 
-### A1. Choose the area
+### A1. Choose the area and the sources
 
-Desktop GUI (place search, pan/zoom, draw the exact polygon mask, source
-coverage panel):
+Desktop GUI:
 
 ```bash
 dronecv gis gui
 ```
 
-Or directly with a bounding box (lat1,lon1,lat2,lon2 = SW corner, NE corner)
-after checking what data exists there:
+Workflow in the window: search the place by name (the result is only a
+dashed **preview** frame — it never becomes the selection), then **draw the
+exact AOI** yourself (rectangle or polygon; deleting the shape clears the
+selection). Drawing triggers the coverage check (~1 minute: it queries OSM,
+scans Overture and lists Sentinel-2 scenes) and the panel then shows, side
+by side: DEM tiles, **OSM vs Overture building counts and height
+coverage**, and recent Sentinel-2 dates. The Buildings/Imagery selectors
+are pre-set to the recommendation (the source that actually has more
+buildings; `s2` when scenes exist) — override them freely, add the
+*reconstruct buildings from imagery* checkbox and a *palette photos*
+folder, then Build.
+
+CLI equivalent of the coverage check:
 
 ```bash
 dronecv gis info --bbox 47.4925,19.0290,47.5105,19.0560
 ```
 
-`info` reports DEM tile availability, building counts and the % with real
-heights — decide *before* building whether the area needs the imagery
-reconstruction step.
+**Choosing between sources, honestly:**
+
+| Source | Strengths | Weaknesses | Pick it when |
+|---|---|---|---|
+| Buildings: **OSM/Overpass** | richest tags (`roof:shape`, `building:part` LoD for monuments, POIs with wikidata → Commons photos), fresh to the minute | coverage = mapper effort; public-server usage policy | well-mapped areas (most European cities) |
+| Buildings: **Overture** | OSM + Microsoft ML footprints + Esri merged: better coverage where OSM is thin, often better heights; S3 = no rate limits | monthly releases, poorer tags (no `building:part`), 30-60 s scan | sparsely mapped areas, filtered networks |
+| Imagery: **`s2`** (Sentinel-2) | dated scenes every ~5 days, automatic cloud-free compositing, free incl. commercial | 10 m/px | palette + vegetation + large-structure reconstruction |
+| Imagery: **`eox`** | pretty cloudless mosaic | no date (no shadow heights), **non-commercial** | quick previews only |
+| Imagery: **`xyz:URL`** | 0.3-0.6 m/px | provider ToS is on you | serious footprint reconstruction |
+| Imagery: **your GeoTIFF** | best of all: sub-meter + known time → shadow heights | you must have one | whenever you do |
 
 ### A2. Build at maximum quality
 
@@ -61,7 +79,7 @@ dronecv gis build \
     --bbox 47.4925,19.0290,47.5105,19.0560 \
     --env-name budapest_hq \
     --res 1.0 \
-    --reconstruct-buildings --imagery eox --imagery-res 10 \
+    --imagery s2 \
     --palette-photos my_photos/ \
     --ortho my_ortho.tif --ortho-utc 2025-06-21T10:00:00Z
 ```
@@ -73,8 +91,9 @@ except `--bbox`/`--place` and `--env-name`:
 |---|---|---|
 | `--res 1.0` | 1 m/px mosaic: crisp building edges (default is already 1.0; 2.0 halves memory for big areas) | always for quality |
 | `--palette-photos DIR` | extracts the zone's roof/wall color clusters from your photos of the area — walls get their own plaster tones, roofs the real tile colors | 3-10 photos are enough; aerial + street level mix is best |
-| `--reconstruct-buildings` | extracts extra building footprints from satellite imagery where OSM/Overture have nothing | sparse/unmapped areas |
-| `--imagery eox` | Sentinel-2 cloudless as the imagery source (free, ~10 m/px → only large structures) | when you have no better imagery |
+| `--reconstruct-buildings` | extracts extra building footprints from satellite imagery where OSM/Overture have nothing | sparse/unmapped areas (NOT well-mapped centers — at 10 m it only adds noise there) |
+| `--imagery s2` | Sentinel-2 multi-date **cloud-free composite** (~10 m): clouds and their shadows are detected per scene and holes filled from other dates automatically | the default imagery choice — palette, vegetation, large structures |
+| `--imagery eox` | Sentinel-2 cloudless mosaic (no dates, non-commercial) | quick previews |
 | `--imagery "xyz:URL"` | high-res XYZ tiles (~0.3-0.6 m/px) — you are responsible for the provider's terms of service | serious reconstruction |
 | `--ortho file.tif --ortho-utc …` | your own georeferenced orthophoto **with acquisition time** → shadow-based height inference for untagged buildings + roof palette + vegetation green-spots | best single upgrade if you have regional orthophotos |
 | *(automatic)* `--no-ortho-normalize` to disable | composite-mosaic strips (different exposure/tone per acquisition) are detected and radiometrically aligned before any use — the same roof is recognized whether its strip is bright or dark | leave on; disable only for single-acquisition imagery you trust |
@@ -139,10 +158,10 @@ Manual alternative:
 
 Output licensing is inherited from the data sources (details in
 [3d_product.md](3d_product.md)): OSM/Overture data is ODbL (keep the
-attribution strings from `scene_meta.json`), Copernicus DEM allows
-commercial use with credit, **EOX Sentinel-2 imagery is non-commercial** —
-for a sellable product feed the palette/reconstruction with your own or
-licensed imagery.
+attribution strings from `scene_meta.json`), Copernicus DEM and Sentinel-2
+(`--imagery s2`) allow commercial use with credit ("contains modified
+Copernicus Sentinel data"), **EOX imagery is non-commercial** — for a
+sellable product use `s2`, your own or licensed imagery.
 
 ---
 
@@ -268,9 +287,12 @@ success, and a PASS/FAIL verdict against the env thresholds.
 
 | Symptom | Fix |
 |---|---|
-| Overpass timeouts / 403 (corporate or cloud proxy) | use the Overture providers: `scripts/test_budapest.py --source overture`; for `gis build`, Overture is selected automatically when Overpass is unreachable in coverage checks — or build from a normal network |
-| `--imagery eox` cannot connect | the network blocks non-allowlisted hosts; run from a normal network or supply `--ortho` |
-| Training slow on CPU | lower `--budget`, keep `image_width` at 128; or run on a CUDA machine (no code change) |
+| pip stuck for hours "backtracking" | you forgot `-c constraints.txt`, or Python is not 3.11/3.12 (recreate the venv: `py -3.12 -m venv .venv`) |
+| `the desktop GUI requires PySide6` | install the gui extra: `pip install -e ".[dev,gis,gui]" -c constraints.txt` |
+| Overpass 406 / 403 / 429 | handled automatically (identifying User-Agent + public mirror fallback); if ALL mirrors fail, switch Buildings to `overture` |
+| Overpass timeouts (corporate or cloud proxy) | use the Overture providers (GUI: Buildings→overture; scripts: `--source overture`) — public S3, no rate limits |
+| `--imagery eox` cannot connect | prefer `--imagery s2`; or supply `--ortho` |
+| Training slow on CPU | lower `--budget`, keep `image_width` at 128; or install CUDA torch (`pip install torch --index-url https://download.pytorch.org/whl/cu124`) — auto-detected, no code change |
 | `export-blender` says Blender not found | install Blender and re-run, or copy the printed `blender --background …` command to a machine that has it |
 | pyarrow crash while scanning Overture | already mitigated (crash-isolated worker processes); if it persists, re-run — partial scans retry file by file |
 | Unity imports glb without materials | install `com.unity.cloud.gltfast` before importing |
