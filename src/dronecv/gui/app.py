@@ -135,10 +135,15 @@ def run_gui() -> None:  # pragma: no cover - requires a display
 
     class Bridge(QObject):
         mask_drawn = Signal(str)
+        mask_deleted = Signal()
 
         @Slot(str)
         def maskDrawn(self, geojson: str) -> None:  # noqa: N802 (JS naming)
             self.mask_drawn.emit(geojson)
+
+        @Slot()
+        def maskDeleted(self) -> None:  # noqa: N802 (JS naming)
+            self.mask_deleted.emit()
 
     class CoverageWorker(QThread):
         done = Signal(dict)
@@ -254,6 +259,7 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.web.page().setWebChannel(self.channel)
             self.web.setHtml(MAP_HTML, baseUrl=QUrl("https://dronecv.local/"))
             self.bridge.mask_drawn.connect(self.on_mask)
+            self.bridge.mask_deleted.connect(self.on_mask_deleted)
 
             split = QSplitter()
             split.addWidget(panel)
@@ -304,6 +310,14 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             )
             worker.finished.connect(lambda w=worker: self._drop_worker(w))
             worker.start()
+
+        def on_mask_deleted(self) -> None:
+            self.state.mask_geojson = None
+            self.state.bbox = None
+            self.state.coverage = None
+            self._cov_generation += 1  # invalidate any in-flight check
+            self.coverage_view.setPlainText("")
+            self._refresh_ready()
 
         def _drop_worker(self, worker) -> None:
             if worker in self._cov_workers:

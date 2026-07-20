@@ -48,15 +48,20 @@ map.on(L.Draw.Event.EDITED, (e) => {
         if (bridge) bridge.maskDrawn(JSON.stringify(layer.toGeoJSON()));
     });
 });
+map.on(L.Draw.Event.DELETED, () => {
+    if (bridge) bridge.maskDeleted();
+});
 
 // Called from Python.
 function setView(lat, lon, zoom) { map.setView([lat, lon], zoom); }
 function showBBox(s, w, n, e) {
+    // PREVIEW ONLY: frame the searched place with a dashed hint rectangle.
+    // It does NOT become the selection — the user draws the exact AOI
+    // (a whole-city bbox from geocoding must never start a build/coverage).
     drawn.clearLayers();
-    drawn.addLayer(L.rectangle([[s, w], [n, e]], { color: '#0b3954' }));
+    drawn.addLayer(L.rectangle([[s, w], [n, e]],
+        { color: '#888', dashArray: '6 6', fill: false }));
     map.fitBounds([[s, w], [n, e]]);
-    if (bridge) bridge.maskDrawn(JSON.stringify(
-        L.rectangle([[s, w], [n, e]]).toGeoJSON()));
 }
 </script>
 </body></html>"""

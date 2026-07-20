@@ -34,13 +34,24 @@ def _pos_scale(ds: CaptureDataset) -> float:
     return float(max(pos.max() * 1.3, 50.0))
 
 
+def default_device() -> str:
+    """CUDA when available (10-30x on the conv backbones), else CPU."""
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def train_models(
     cfg: Config,
     ds: CaptureDataset,
     warm_start: ModelBundle | None = None,
-    device: str = "cpu",
+    device: str | None = None,
 ) -> tuple[ModelBundle, dict]:
-    """One training round over the current dataset. Returns bundle + info."""
+    """One training round over the current dataset. Returns bundle + info.
+    `device=None` auto-selects (CUDA if present); the saved bundle is always
+    moved back to CPU so inference deployments stay device-agnostic."""
+    if device is None:
+        device = default_device()
+        if device != "cpu":
+            log.info(f"training on {device} ({torch.cuda.get_device_name(0)})")
     seed_everything(cfg.env.seed)
     t = cfg.training
     train_idx, val_idx = ds.spatial_split(t.val_cell_m, t.val_fraction, seed=cfg.env.seed)
