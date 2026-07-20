@@ -59,13 +59,13 @@ def _dist_m(lat1, lon1, lat2, lon2):
     return math.hypot((lat1 - lat2) * k, (lon1 - lon2) * k * math.cos(math.radians(lat1)))
 
 
-def train_combo(env: str, name: str, overrides: dict, out_dir: Path):
+def train_combo(env: str, name: str, overrides: dict, out_dir: Path, epochs: int = 10):
     from dronecv.config import load_config
     from dronecv.training.bundle import ModelBundle
     from dronecv.training.trainer import load_dataset, train_models
 
     cfg = load_config(env, overrides={
-        "training": {**overrides, "epochs_per_round": 10},
+        "training": {**overrides, "epochs_per_round": epochs},
     }, root=ROOT)
     if name == "none":  # reuse the already-trained baseline bundle
         base = cfg.bundle_dir
@@ -148,6 +148,8 @@ def main() -> None:
     ap.add_argument("--env", default="budapest_test")
     ap.add_argument("--photos", type=Path, default=ROOT / "tests" / "data" / "budapest_photos")
     ap.add_argument("--out", type=Path, default=ROOT / "artifacts" / "budapest_test" / "filter_search")
+    ap.add_argument("--epochs", type=int, default=10,
+                    help="epochs per combo (30+ for a converged comparison on a real machine)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -155,7 +157,7 @@ def main() -> None:
     results = {}
     for name, overrides in COMBOS.items():
         print(f"=== combo {name} ===", flush=True)
-        bundle = train_combo(args.env, name, overrides, args.out)
+        bundle = train_combo(args.env, name, overrides, args.out, epochs=args.epochs)
         metrics, _ = score_bundle(bundle, views, args.photos)
         results[name] = metrics
         print(json.dumps({name: metrics}), flush=True)
