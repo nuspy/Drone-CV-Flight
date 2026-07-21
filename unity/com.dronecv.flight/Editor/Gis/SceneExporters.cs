@@ -77,9 +77,53 @@ namespace DroneCV.Flight.Editor.Gis
                 if (hasN) nBase += verts.Length;
                 if (hasT) tBase += verts.Length;
             }
+
+            // The Terrain is not a MeshFilter — export it as a decimated mesh so
+            // the OBJ actually contains the ground.
+            foreach (var terrain in root.GetComponentsInChildren<Terrain>(true))
+            {
+                string matName = $"mat_{matId++}";
+                WriteMtl(mtl, matName, null, ci);
+                int added = AppendTerrain(obj, terrain, matName, vBase, ci);
+                vBase += added;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(objPath));
             File.WriteAllText(objPath, obj.ToString());
             File.WriteAllText(mtlPath, mtl.ToString());
+        }
+
+        /// Append a Terrain as an OBJ group (decimated to <= ~193 grid). Returns
+        /// the number of vertices written.
+        static int AppendTerrain(StringBuilder obj, Terrain terrain, string matName,
+                                 int vBase, CultureInfo ci)
+        {
+            var td = terrain.terrainData;
+            if (td == null) return 0;
+            var pos = terrain.transform.position;
+            var size = td.size;
+            int hres = td.heightmapResolution;
+            int n = Mathf.Min(hres, 193);
+            var h = td.GetHeights(0, 0, hres, hres);
+            obj.AppendLine("o DroneCV_Terrain");
+            obj.AppendLine("usemtl " + matName);
+            for (int r = 0; r < n; r++)
+                for (int c = 0; c < n; c++)
+                {
+                    int hr = r * (hres - 1) / (n - 1), hc = c * (hres - 1) / (n - 1);
+                    float x = pos.x + c / (float)(n - 1) * size.x;
+                    float z = pos.z + r / (float)(n - 1) * size.z;
+                    float y = pos.y + h[hr, hc] * size.y;
+                    obj.AppendLine($"v {x.ToString(ci)} {y.ToString(ci)} {z.ToString(ci)}");
+                }
+            for (int r = 0; r < n - 1; r++)
+                for (int c = 0; c < n - 1; c++)
+                {
+                    int a = vBase + r * n + c, b = a + 1, d = a + n, e = d + 1;
+                    obj.AppendLine($"f {a} {d} {b}");
+                    obj.AppendLine($"f {b} {d} {e}");
+                }
+            return n * n;
         }
 
         static string Face(int v, int t, int n, bool hasT, bool hasN)

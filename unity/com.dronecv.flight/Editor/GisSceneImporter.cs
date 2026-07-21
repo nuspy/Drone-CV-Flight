@@ -10,6 +10,7 @@
 // -90° around X on import by Unity's OBJ importer convention handling below.
 
 using System.IO;
+using DroneCV.Flight.Editor.Gis;
 using DroneCV.Flight.Geo;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -118,6 +119,10 @@ namespace DroneCV.Flight.Editor
             terrainGo.name = "DroneCV Terrain";
             // Terrain origin at its SW corner: place so ENU origin = anchor.
             terrainGo.transform.position = new Vector3(e0, hMin, n0);
+            // URP/HDRP: a freshly created Terrain has no valid material and
+            // renders magenta — assign the pipeline's terrain material.
+            var terrMat = PipelineMaterials.TerrainMaterial();
+            if (terrMat != null) terrainGo.GetComponent<Terrain>().materialTemplate = terrMat;
 
             ImportBuildings(dir);
             CreateAnchorAsset(meta);
@@ -128,36 +133,49 @@ namespace DroneCV.Flight.Editor
 
         private static void ImportBuildings(string dir)
         {
-            // Preferred: scene.glb (LoD2 roofs + PBR palette materials +
-            // facade texture). Needs a glTF importer package (glTFast /
-            // com.unity.cloud.gltfast) installed — then the copied .glb
-            // imports automatically with materials; the OBJ fallback below
-            // stays for projects without one.
+            // 1) scene.glb via a glTF importer (best: LoD2 roofs + PBR palette
+            //    materials + facade texture), if one is installed.
+            if (TryImportGlb(dir)) return;
+            // 2) native builder from buildings.json + palette.json: works in any
+            //    render pipeline with per-class materials ALWAYS assigned, no
+            //    external package needed (LoD1).
+            if (BuildingBuilder.TryBuild(dir)) return;
+            // 3) last resort: the plain OBJ (now carries a .mtl, but no pipeline
+            //    material upgrade).
+            ImportObj(dir);
+        }
+
+        private static bool TryImportGlb(string dir)
+        {
             var glb = Path.Combine(dir, "scene.glb");
-            if (File.Exists(glb))
+            if (!File.Exists(glb)) return false;
+            Directory.CreateDirectory("Assets/DroneCVImported");
+            var glbDst = "Assets/DroneCVImported/scene.glb";
+            File.Copy(glb, glbDst, true);
+            AssetDatabase.ImportAsset(glbDst);
+            var glbPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(glbDst);
+            if (glbPrefab == null)
             {
-                Directory.CreateDirectory("Assets/DroneCVImported");
-                var glbDst = "Assets/DroneCVImported/scene.glb";
-                File.Copy(glb, glbDst, true);
-                AssetDatabase.ImportAsset(glbDst);
-                var glbPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(glbDst);
-                if (glbPrefab != null)
-                {
-                    var scene = Object.Instantiate(glbPrefab);
-                    scene.name = "DroneCV GIS Scene (glTF)";
-                    foreach (var mf in scene.GetComponentsInChildren<MeshFilter>())
-                        mf.gameObject.AddComponent<MeshCollider>();
-                    return; // glTF path replaces the OBJ buildings
-                }
-                Debug.LogWarning("[DroneCV] scene.glb copied but no glTF importer " +
-                                 "package found — falling back to buildings.obj " +
-                                 "(install com.unity.cloud.gltfast for materials).");
+                Debug.Log("[DroneCV] no glTF importer package — building natively " +
+                          "from buildings.json (install com.unity.cloud.gltfast for LoD2 + textures).");
+                return false;
             }
+            var scene = Object.Instantiate(glbPrefab);
+            scene.name = "DroneCV GIS Scene (glTF)";
+            foreach (var mf in scene.GetComponentsInChildren<MeshFilter>())
+                mf.gameObject.AddComponent<MeshCollider>();
+            return true;
+        }
+
+        private static void ImportObj(string dir)
+        {
             var src = Path.Combine(dir, "buildings.obj");
             if (!File.Exists(src)) return;
             Directory.CreateDirectory("Assets/DroneCVImported");
             var dst = "Assets/DroneCVImported/buildings.obj";
             File.Copy(src, dst, true);
+            var mtl = Path.Combine(dir, "buildings.mtl");
+            if (File.Exists(mtl)) File.Copy(mtl, "Assets/DroneCVImported/buildings.mtl", true);
             AssetDatabase.ImportAsset(dst);
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(dst);
             if (prefab != null)
@@ -207,7 +225,7 @@ namespace DroneCV.Flight.Editor
             go.transform.localScale = kind == "conifer"
                 ? new Vector3(4f, 7.5f, 4f) : new Vector3(8f, 6f, 8f);
             go.transform.position = new Vector3(0, kind == "conifer" ? 7.5f : 9f, 0);
-            var mat = new Material(Shader.Find("Standard")) { color = color };
+            var mat = PipelineMaterials.Lit(color);  // pipeline-aware (no magenta in URP)
             AssetDatabase.CreateAsset(mat, $"Assets/DroneCVImported/tree_{kind}_mat.asset");
             go.GetComponent<MeshRenderer>().sharedMaterial = mat;
             var prefab = PrefabUtility.SaveAsPrefabAsset(go, path);

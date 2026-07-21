@@ -104,6 +104,12 @@ def test_scene_export_unity_blender_assets(built, tmp_path):
     obj_text = (out / "buildings.obj").read_text()
     assert meta["n_building_meshes"] > 5
     assert obj_text.count("v ") > 100 and obj_text.count("f ") > 100
+    # per-class materials for DCC/Unity: OBJ references a .mtl with usemtl groups
+    assert "mtllib buildings.mtl" in obj_text and "usemtl " in obj_text
+    assert (out / "buildings.mtl").read_text().count("newmtl ") >= 2
+
+    # data the NATIVE Unity importer needs (no glTF importer package required)
+    assert (out / "buildings.json").exists() and (out / "palette.json").exists()
 
     assert (out / "blender_build_scene.py").exists()
     assert "OpenStreetMap" in " ".join(meta["attribution"])

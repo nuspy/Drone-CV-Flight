@@ -136,7 +136,8 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
             bmesh.add(prism.vertices, prism.faces)
             n_buildings += 1
         objects["buildings"] = bmesh
-    m.write_obj(out_dir / "buildings.obj", objects)
+    # (buildings.obj is written below, once the per-class palette colours exist,
+    #  so the OBJ carries a .mtl instead of a single default material.)
 
     # ---- scene.glb: terrain (class vertex colors) + LoD2 buildings with
     # palette PBR materials and a procedural facade window texture ----
@@ -152,6 +153,14 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
         "commercial": palette.roof[min(1, len(palette.roof) - 1)],
         "industrial": CLASS_COLORS[12], "landmark": CLASS_COLORS[14],
     }
+    # buildings.obj + .mtl (per-class colours) — plain OBJ path for DCC/Unity.
+    obj_materials = {
+        name: (palette.wall[0] if name.startswith("walls")
+               else roof_color_of.get(name.split("_", 1)[-1], palette.roof[0]))
+        for name, mesh in objects.items() if mesh.vertices
+    }
+    m.write_obj(out_dir / "buildings.obj", objects, materials=obj_materials)
+
     tmesh = m.grid_terrain(ground, meta.res_m, meta.e0, meta.n0,
                            step=max(1, meta.width // 256))
     tpos = np.asarray(tmesh.vertices, dtype=np.float32)
@@ -216,5 +225,13 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
 
     # ---- Blender assembly script bundled with the export ----
     shutil.copy(Path(__file__).parent / "blender_build_scene.py", out_dir / "blender_build_scene.py")
+
+    # ---- data for the native Unity importer (builds buildings + per-class
+    # materials WITHOUT needing a glTF importer package) ----
+    for name in ("buildings.json", "palette.json"):
+        src = Path(gis_dir) / name
+        if src.exists():
+            shutil.copy(src, out_dir / name)
+
     log.info(f"scene exported to {out_dir}: {n_buildings} building meshes, {len(trees)} trees")
     return out_dir

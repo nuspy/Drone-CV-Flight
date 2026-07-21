@@ -174,9 +174,9 @@ namespace DroneCV.Flight.Editor.Gis
             if (shader != null) mat = new Material(shader);
             else
             {
-                // No custom shader available: fall back to a lit material tinted
-                // white (vertex colours won't multiply, but geometry still merges).
-                mat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
+                // No custom shader available: fall back to the active pipeline's
+                // lit shader (vertex colours won't multiply, but geometry merges).
+                mat = new Material(PipelineMaterials.LitShader());
                 Debug.LogWarning("[DroneCV] DroneCV/DistrictMerged shader not found — " +
                                  "merged object will use a single plain material without per-vertex tint.");
             }

@@ -251,15 +251,31 @@ def grid_terrain(ground: np.ndarray, res_m: float, e0: float, n0: float, step: i
     return mesh
 
 
-def write_obj(path, objects: dict[str, Mesh]) -> None:
-    """Minimal OBJ writer: one `o` group per named mesh."""
+def write_obj(path, objects: dict[str, Mesh], materials: dict | None = None) -> None:
+    """Minimal OBJ writer: one `o` group per named mesh. If `materials`
+    ({group_name: (r, g, b) in [0,1]}) is given, a sibling `.mtl` is written and
+    each group gets `usemtl` — so importers (Unity/Blender/DCC) assign per-group
+    colours instead of one default material."""
+    from pathlib import Path as _P
+
+    path = _P(path)
+    mtl_name = path.with_suffix(".mtl").name if materials else None
     with open(path, "w") as fh:
         fh.write("# dronecv gis export (Z-up ENU meters)\n")
+        if mtl_name:
+            fh.write(f"mtllib {mtl_name}\n")
         offset = 1
         for name, mesh in objects.items():
             fh.write(f"o {name}\n")
+            if materials and name in materials:
+                fh.write(f"usemtl {name}\n")
             for v in mesh.vertices:
                 fh.write(f"v {v[0]:.3f} {v[1]:.3f} {v[2]:.3f}\n")
             for f in mesh.faces:
                 fh.write(f"f {f[0] + offset} {f[1] + offset} {f[2] + offset}\n")
             offset += len(mesh.vertices)
+    if materials:
+        with open(path.with_suffix(".mtl"), "w") as fh:
+            for name, rgb in materials.items():
+                r, g, b = (float(c) for c in rgb)
+                fh.write(f"newmtl {name}\nKd {r:.3f} {g:.3f} {b:.3f}\nKa 0 0 0\nd 1\nillum 1\n\n")

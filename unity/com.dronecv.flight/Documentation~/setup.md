@@ -28,8 +28,16 @@ Open **DroneCV > GIS Environment Builder…**. The window drives the same Python
    *Export scene + import into Unity* — the terrain (with collider), buildings
    (glTF/OBJ with colliders), trees and a GeoAnchorAsset are created via the same
    `DroneCV > Import GIS Scene…` importer.
-4. **Export** to OBJ (native), glTF/GLB, a Unity Prefab + TerrainData, or FBX
-   (only if `com.unity.formats.fbx` is installed).
+4. **Export** to OBJ (native, includes the Terrain), glTF/GLB, a Unity Prefab +
+   TerrainData, or FBX (only if `com.unity.formats.fbx` is installed).
+
+**Render pipeline / materials.** The import works in **URP, HDRP and Built-in**:
+the Terrain gets the pipeline's terrain material and every material uses the
+active pipeline's lit shader (no magenta). Buildings import from `scene.glb`
+with LoD2 roofs + facade textures if a glTF importer (`com.unity.cloud.gltfast`)
+is installed; **otherwise they are built natively from `buildings.json` +
+`palette.json`** with per-class materials always assigned — so terrain, trees
+and buildings render correctly out of the box with no extra packages.
 5. **Merge district** (optional) collapses the imported buildings into one mesh
    + one material per unit (whole scene / per class / 500 m cell), baking each
    building's colour into vertex colours over one shared tiling facade texture
