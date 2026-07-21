@@ -355,8 +355,11 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             ])
             self.imagery_combo.currentIndexChanged.connect(self._refresh_ready)
             self.imagery_combo.setToolTip(
-                "Satellite imagery to drape as color (and, when reconstruction is "
-                "on, to detect extra buildings).\n\n"
+                "Satellite imagery. When selected it is DRAPED as the ground colour "
+                "(visible in renders/export) and also drives the roof/wall palette, "
+                "imagery vegetation and shadow-based heights — even without "
+                "reconstruction. With 'reconstruct buildings' it additionally "
+                "detects extra footprints.\n\n"
                 "• none — synthetic class colors only (shape-first; lighting-"
                 "invariant).\n"
                 "• s2 — Sentinel-2 multi-date CLOUD-FREE composite (~10 m/px, "
@@ -670,11 +673,24 @@ def run_gui() -> None:  # pragma: no cover - requires a display
             self.status.setText(why)
 
         def on_build(self) -> None:
+            self._refresh_ready()  # sync state from widgets (no race with combos)
+            # reconstruct needs imagery: auto-pick Sentinel-2 rather than
+            # silently skipping the reconstruction.
+            if (self.state.reconstruct and self.state.imagery == "none"
+                    and not self.state.ortho_path):
+                self.imagery_combo.setCurrentIndex(1)  # -> "s2 …"
+                self._refresh_ready()
+                self.status.setText("reconstruct needs imagery — selected Sentinel-2 (s2). "
+                                    "Change it in the Imagery box if you prefer.")
+            kwargs = self.state.build_kwargs()
+            log.info("GUI build: env=%s buildings=%s imagery=%s reconstruct=%s res=%s",
+                     kwargs.get("env_name"), self.state.selected_sources.get("buildings"),
+                     kwargs.get("imagery"), kwargs.get("reconstruct_buildings"), kwargs.get("res_m"))
             self.build_btn.setEnabled(False)
             self.progress.setVisible(True)
             self.web.page().runJavaScript(f"drawCells({self.state.cells_json()!r})")
             self._controller = CellDecisionController()
-            worker = BuildWorker(self.state.build_kwargs(), self._controller, parent=self)
+            worker = BuildWorker(kwargs, self._controller, parent=self)
             self._build_worker = worker
             self._register(worker)
             worker.progress.connect(self.status.setText)

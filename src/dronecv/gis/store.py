@@ -86,6 +86,15 @@ class GisStore:
             else None
         )
 
+    def create_albedo(self) -> np.ndarray:
+        """Allocate the draped-orthophoto colour layer (uint8 HxWx3). Only
+        created when a build actually has imagery to drape."""
+        path = self.root / "albedo.npy"
+        self.albedo = np.lib.format.open_memmap(
+            path, mode="w+", dtype=np.uint8, shape=(self.meta.height, self.meta.width, 3)
+        )
+        return self.albedo
+
     @classmethod
     def create(cls, root: Path, meta: GisMeta) -> GisStore:
         root = Path(root)
@@ -103,8 +112,8 @@ class GisStore:
         (self.root / "meta.json").write_text(self.meta.to_json())
 
     def flush(self) -> None:
-        for arr in (self.ground, self.build_h, self.class_id, self.veg_h):
-            if hasattr(arr, "flush"):
+        for arr in (self.ground, self.build_h, self.class_id, self.veg_h, self.albedo):
+            if arr is not None and hasattr(arr, "flush"):
                 arr.flush()
         self.save_meta()
 

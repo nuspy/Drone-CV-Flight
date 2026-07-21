@@ -159,12 +159,17 @@ def build_environment(
         from dronecv.gis.providers.imagery import load_geotiff_ortho
 
         ortho = load_geotiff_ortho(ortho_path, anchor, ortho_utc, target_res_m=max(res_m, 0.5))
-    if ortho is None and reconstruct_buildings and imagery:
+    # Fetch imagery whenever a source is selected — NOT only for reconstruction.
+    # It also drives the colour drape (store.albedo), the roof/wall palette,
+    # imagery vegetation and shadow-based heights. (Previously gated on
+    # reconstruct_buildings, so `--imagery s2` alone was silently ignored.)
+    if ortho is None and imagery:
         from dronecv.gis.providers.footprints_from_imagery import (
             fetch_wms_ortho,
             fetch_xyz_ortho,
         )
 
+        log.info(f"imagery source '{imagery}' — fetching…")
         if imagery == "eox":
             ortho = fetch_wms_ortho(bbox, anchor, res_m=imagery_res_m)
             meta.attribution.append(
@@ -215,7 +220,8 @@ def build_environment(
     n_reconstructed = 0
     if reconstruct_buildings:
         if ortho is None:
-            log.warning("reconstruct_buildings requested but no imagery available — skipped")
+            log.warning("reconstruct_buildings requested but NO imagery was provided — skipped. "
+                        "Select an imagery source (--imagery s2|eox) or pass --ortho photo.tif.")
         else:
             from dronecv.gis.providers.footprints_from_imagery import (
                 extract_footprints,
@@ -243,6 +249,17 @@ def build_environment(
     if water.any():
         store.ground[water] = float(np.percentile(np.asarray(store.ground)[water], 10.0))
     b_stats = rasterize_buildings(store, anchor, buildings)
+
+    # ---- colour drape: apply the imagery onto the ground albedo (visible in
+    # renders + export). Without imagery the store keeps no albedo and rendering
+    # falls back to synthetic class colours (shape-first default). ----
+    drape_cov = None
+    if ortho is not None:
+        from dronecv.gis.drape import drape_albedo
+
+        drape_cov = drape_albedo(store, ortho)
+        log.info(f"draped {imagery or 'ortho'} imagery onto the ground albedo "
+                 f"({drape_cov:.0%} of texels covered)")
 
     # Persist the VECTOR footprints (heights now resolved): LoD2 scene export
     # builds real prisms + shaped roofs from these instead of re-vectorizing
@@ -328,6 +345,7 @@ def build_environment(
         "max_ground": max_ground,
         "n_shadow_heights": n_shadow,
         "n_reconstructed": n_reconstructed,
+        **({"albedo_drape_coverage": round(drape_cov, 4)} if drape_cov is not None else {}),
         **({"radiometric_zones": {"n_zones": rad_stats.n_zones,
                                   "corrections": rad_stats.corrections}}
            if rad_stats is not None else {}),

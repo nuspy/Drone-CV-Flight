@@ -161,7 +161,12 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
     cls_full = np.asarray(store.class_id)
     tr = np.clip(((tpos[:, 1] - meta.n0) / meta.res_m).astype(int), 0, meta.height - 1)
     tc = np.clip(((tpos[:, 0] - meta.e0) / meta.res_m).astype(int), 0, meta.width - 1)
-    tcol = color_lut[cls_full[tr, tc]]
+    # Prefer the draped imagery colours (if a build had imagery); fall back to
+    # synthetic class colours where there is no albedo.
+    if store.albedo is not None:
+        tcol = np.asarray(store.albedo)[tr, tc].astype(np.float32) / 255.0
+    else:
+        tcol = color_lut[cls_full[tr, tc]]
     mat_terr = glb.add_material("terrain", (1.0, 1.0, 1.0))
     glb.add_mesh("terrain", tpos, np.asarray(tmesh.faces, np.uint32), mat_terr, colors=tcol)
     for name, mesh in objects.items():

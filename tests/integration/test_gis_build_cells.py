@@ -95,6 +95,41 @@ def test_skip_marks_cell_and_second_build_is_cached(tmp_path):
     assert calls["n"] == 0  # every cell served from the shared cache
 
 
+def test_imagery_is_draped_onto_albedo(tmp_path):
+    # A build WITH imagery (here an injected ortho, no network) writes a visible
+    # ground albedo; without imagery no albedo layer is created.
+    import numpy as np
+
+    from dronecv.gis.providers.imagery import OrthoImage
+    from dronecv.gis.store import GisStore
+
+    def _sources_with_ortho(ortho):
+        s = _sources(OverpassBuildings(fixture_path=FIXTURES / "overpass_buildings.json"))
+        s.ortho = ortho
+        return s
+
+    # a big red ortho covering the whole AOI (ENU meters around the anchor)
+    rgb = np.zeros((400, 400, 3), np.float32)
+    rgb[..., 0] = 1.0
+    ortho = OrthoImage(gray=rgb[..., 0], res_m=4.0, e0=-800.0, n0=-800.0, rgb=rgb)
+
+    gis_dir = build_environment(
+        BBOX, "with_img", out_root=tmp_path / "a", configs_root=tmp_path,
+        sources=_sources_with_ortho(ortho), res_m=4.0, cache_root=tmp_path / "c",
+    )
+    assert (gis_dir / "albedo.npy").exists()
+    store = GisStore.open(gis_dir)
+    assert store.albedo is not None
+    assert (store.albedo[..., 0] == 255).all()  # red draped everywhere
+
+    gis_dir2 = build_environment(
+        BBOX, "no_img", out_root=tmp_path / "b", configs_root=tmp_path,
+        sources=_sources(OverpassBuildings(fixture_path=FIXTURES / "overpass_buildings.json")),
+        res_m=4.0, cache_root=tmp_path / "c",
+    )
+    assert not (gis_dir2 / "albedo.npy").exists()  # shape-first default, no drape
+
+
 def test_default_cache_root_resumes_across_runs(tmp_path):
     # The GUI/CLI build with cache_root=None (the DEFAULT). conftest points
     # DRONECV_CACHE_DIR at a tmp dir, so this exercises the default-path resume
