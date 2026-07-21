@@ -106,7 +106,7 @@ namespace DroneCV.Flight.Editor.Gis
                 "Python, a standalone one is downloaded automatically. Nothing is installed system-wide.",
                 MessageType.Info);
             if (GUILayout.Button(PythonEnv.IsReady() ? "Repair / update environment" : "Install environment"))
-                RunAsync(() => PythonEnv.Ensure(Log), "environment ready");
+                RunAsync(() => { PythonEnv.Ensure(Log); return (object)null; }, "environment ready");
         }
 
         void BuildPanel()
@@ -128,12 +128,12 @@ namespace DroneCV.Flight.Editor.Gis
                 "Ground sampling of the imagery mosaic. LOWER = finer texture but the mosaic grows " +
                 "quadratically and the build is slower; 1 m is a good default, use 2–4 for large areas. " +
                 "Building shapes come from vector data, so this mainly affects the draped texture."), _resM, 0.5f, 10f);
-            _buildings = EditorGUILayout.Popup(new GUIContent("Buildings",
-                "Footprint + height source. osm_overpass: best in Europe; overture: often better heights in the US."),
+            _buildings = PopupTip("Buildings",
+                "Footprint + height source. osm_overpass: best in Europe; overture: often better heights in the US.",
                 _buildings, new[] { "osm_overpass", "overture" });
-            _imagery = EditorGUILayout.Popup(new GUIContent("Imagery",
+            _imagery = PopupTip("Imagery",
                 "Satellite colour to drape. none = synthetic class colours (shape-first). s2 = Sentinel-2 " +
-                "cloud-free (~10 m, free). eox = Sentinel-2 mosaic (non-commercial)."),
+                "cloud-free (~10 m, free). eox = Sentinel-2 mosaic (non-commercial).",
                 _imagery, new[] { "none", "s2", "eox" });
             _reconstruct = EditorGUILayout.Toggle(new GUIContent("Reconstruct buildings",
                 "Extract extra footprints from imagery ONLY where GIS has none. Needs an imagery source; " +
@@ -152,12 +152,12 @@ namespace DroneCV.Flight.Editor.Gis
         void ImportPanel()
         {
             Header("3 · Import into Unity (product default)");
-            _newScene = EditorGUILayout.Popup(new GUIContent("Target scene",
-                "Where to place the generated terrain + objects."),
+            _newScene = PopupTip("Target scene",
+                "Where to place the generated terrain + objects.",
                 _newScene ? 1 : 0, new[] { "Current scene", "New empty scene" }) == 1;
-            _terrainRes = EditorGUILayout.IntPopup(new GUIContent("Terrain resolution",
+            _terrainRes = IntPopupTip("Terrain resolution",
                 "Heightmap grid side (2^n+1). HIGHER = finer relief but larger/slower; 513 is a good default, " +
-                "1025/2049 for mountains, 257 for flat areas. Only affects the ground, not buildings."),
+                "1025/2049 for mountains, 257 for flat areas. Only affects the ground, not buildings.",
                 _terrainRes, new[] { "129", "257", "513", "1025", "2049" }, new[] { 129, 257, 513, 1025, 2049 });
             if (GUILayout.Button("Export scene + import into Unity"))
                 DoExportAndImport();
@@ -181,9 +181,9 @@ namespace DroneCV.Flight.Editor.Gis
         void MergePanel()
         {
             Header("5 · Merge district (fewer objects, one material)");
-            _mergeUnit = EditorGUILayout.Popup(new GUIContent("Unit",
+            _mergeUnit = PopupTip("Unit",
                 "Whole scene = one object+material for all buildings. Per class = one per building class. " +
-                "Cell 500 m = one per neighbourhood block (recommended, composable)."),
+                "Cell 500 m = one per neighbourhood block (recommended, composable).",
                 _mergeUnit, new[] { "Whole scene", "Per class", "Cell 500 m" });
             EditorGUILayout.HelpBox(
                 "Combines the imported building meshes into one mesh + one material per unit, baking each " +
@@ -330,6 +330,21 @@ namespace DroneCV.Flight.Editor.Gis
         // ------------------------------------------------------------- widgets
 
         void Header(string s) => EditorGUILayout.LabelField(s, EditorStyles.boldLabel);
+
+        // Popups with a tooltip: the (GUIContent label, int, string[]) overload
+        // does not exist — the GUIContent-label overloads take GUIContent[].
+        static GUIContent[] Contents(string[] opts)
+        {
+            var g = new GUIContent[opts.Length];
+            for (int i = 0; i < opts.Length; i++) g[i] = new GUIContent(opts[i]);
+            return g;
+        }
+
+        static int PopupTip(string label, string tip, int val, string[] opts) =>
+            EditorGUILayout.Popup(new GUIContent(label, tip), val, Contents(opts));
+
+        static int IntPopupTip(string label, string tip, int val, string[] opts, int[] vals) =>
+            EditorGUILayout.IntPopup(new GUIContent(label, tip), val, Contents(opts), vals);
 
         string Field(string label, string val, string tip) =>
             EditorGUILayout.TextField(new GUIContent(label, tip), val);

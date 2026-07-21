@@ -169,7 +169,10 @@ namespace DroneCV.Flight.Editor.Gis
 
         static Material BuildSharedMaterial(Texture tex)
         {
-            var shader = Shader.Find("DroneCV/DistrictMerged");
+            // The custom vertex-tint shader is Built-in-only; on URP/HDRP use the
+            // pipeline's Lit shader (one material, no per-vertex tint).
+            var shader = GraphicsSettings.currentRenderPipeline == null
+                ? Shader.Find("DroneCV/DistrictMerged") : null;
             Material mat;
             if (shader != null) mat = new Material(shader);
             else
