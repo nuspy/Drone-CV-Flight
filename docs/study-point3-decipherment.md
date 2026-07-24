@@ -205,6 +205,27 @@ risultato scientifico, non un fallimento.
 
 ---
 
+## 7-bis. Bypass del verdetto negativo (escape hatch, con avviso)
+
+Il verdetto di falsificazione è di default un muro: se il corpus non è *language-like*, o se
+nessuna ipotesi sopravvive, il pipeline si ferma. È giusto così — ma a volte l'utente vuole
+comunque *vedere la migliore ipotesi*, sapendo che i numeri dicono che non è reale (per
+esplorazione, per intuizione, per capire *cosa* fallisce).
+
+Per questo `pipeline.run(..., override_feasibility=True)` **forza il passaggio** oltre il
+verdetto negativo, con tre garanzie di onestà non negoziabili:
+
+1. **Avviso rumoroso**: `warnings.warn` a runtime *e* la lista in `report.warnings`.
+2. **Segregazione dei risultati**: gli output forzati vanno in `report.forced`, **mai** in
+   `report.survivors`. Non si mescolano mai risultati forzati con quelli verificati —
+   mescolarli spaccerebbe per verificato ciò che non lo è.
+3. **Marchio esplicito**: `report.feasibility_overridden = True` e messaggio che dichiara
+   "ipotesi forzate, nessuna garanzia statistica — NON presentare come decifrazione".
+
+In sintesi: il bypass ti dà la miglior ipotesi *dopo* averti detto in faccia che non regge.
+La responsabilità di non chiamarla "decifrazione" resta di chi legge — il sistema fa di tutto
+per ricordarglielo.
+
 ## 8. Pipeline algoritmica (pseudocodice) → mappatura sui moduli
 
 ```

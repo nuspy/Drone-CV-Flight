@@ -59,6 +59,30 @@ def test_pipeline_runs_end_to_end_and_is_honest_on_noise():
     assert "survived" in report.message or "No hypothesis" in report.message
 
 
+def test_feasibility_override_forces_past_negative_verdict():
+    import warnings as _warnings
+
+    # noise: not language-like -> default run stops, override continues with a warning
+    noise = null_model.word_shuffled(_structured_tokens(), random.Random(9))
+    tr = build_transliteration([0])
+    tr.tokens = noise
+    db = TypologyDB({"toy-lang": ("toy-family", {"morph:agglutinative": 1.0})})
+
+    default = run(tr, db, seed=0)
+    assert not default.is_language_like
+    assert default.survivors == [] and default.forced == []
+    assert not default.feasibility_overridden
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        forced_report = run(tr, db, seed=0, override_feasibility=True)
+    assert forced_report.feasibility_overridden
+    assert forced_report.warnings and any("OVERRIDE" in w for w in forced_report.warnings)
+    assert any("OVERRIDE" in str(w.message) for w in caught)
+    # forced guesses never leak into the verified 'survivors' bucket
+    assert forced_report.survivors == []
+
+
 def test_transliteration_maps_into_pua():
     tr = build_transliteration([0, 1, 2, 0, 1], word_breaks=[2])
     assert all(0xE000 <= ord(c) <= 0xF8FF for c in tr.text)

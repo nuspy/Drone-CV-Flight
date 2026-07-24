@@ -7,6 +7,7 @@ a held-out generalization test.
 from __future__ import annotations
 
 import random
+import warnings
 from dataclasses import dataclass, field
 
 from decipher.falsification import null_model
@@ -25,6 +26,13 @@ class DecipherReport:
     survivors: list[Hypothesis] = field(default_factory=list)
     all_hypotheses: list[Hypothesis] = field(default_factory=list)
     message: str = ""
+    # --- override bookkeeping -------------------------------------------------------
+    feasibility_overridden: bool = False
+    # hypotheses reported ONLY because the user forced past a negative verdict; these did
+    # NOT survive falsification and carry no epistemic guarantee. Kept separate from
+    # ``survivors`` on purpose — mixing them would launder unverified results as verified.
+    forced: list[Hypothesis] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def run(
@@ -33,9 +41,24 @@ def run(
     priors: dict[str, float] | None = None,
     top_k: int = 5,
     seed: int = 0,
+    override_feasibility: bool = False,
 ) -> DecipherReport:
     """Run the full pipeline. ``seed`` fixes the RNG used by the null models so results are
-    reproducible."""
+    reproducible.
+
+    ``override_feasibility``: by default a negative feasibility verdict is a hard stop —
+    either the corpus is not language-like, or no hypothesis survives falsification. Set this
+    to True to *force past* that verdict. The user is warned loudly, the run continues, and
+    any results are returned in ``report.forced`` (never ``report.survivors``) and flagged as
+    carrying no epistemic guarantee. This is the "I understand, show me the best guess anyway"
+    escape hatch — use it knowing the numbers said it isn't real.
+    """
+    collected_warnings: list[str] = []
+
+    def warn(msg: str) -> None:
+        collected_warnings.append(msg)
+        warnings.warn(msg, stacklevel=2)
+
     rng = random.Random(seed)
     tokens = tr.tokens
 
@@ -44,12 +67,21 @@ def run(
     lang_ok, detail = null_model.is_language_like(tokens, rng)
     fp.is_language_like = lang_ok
     if not lang_ok:
-        return DecipherReport(
-            fingerprint=fp,
-            is_language_like=False,
-            language_test_detail=detail,
-            message="Corpus does not beat its shuffled/random nulls on conditional entropy: "
-                    "not language-like with the current data. Decoding is not attempted.",
+        if not override_feasibility:
+            return DecipherReport(
+                fingerprint=fp,
+                is_language_like=False,
+                language_test_detail=detail,
+                message="Corpus does not beat its shuffled/random nulls on conditional "
+                        "entropy: not language-like with the current data. Decoding is not "
+                        "attempted. Pass override_feasibility=True to force past this.",
+            )
+        warn(
+            "FEASIBILITY OVERRIDE: corpus is NOT language-like (it does not beat its "
+            f"shuffled/random nulls; margin={detail['margin_bits']:.3f} bits < "
+            f"{detail['threshold']} threshold). Continuing anyway at the user's request. "
+            "Any output is a best guess with NO statistical support and must not be presented "
+            "as a decipherment."
         )
 
     # 2. structure
@@ -84,20 +116,44 @@ def run(
         hyp.heldout_ppl_ratio = heldout_ppl_ratio(train, test, model_logprob=None)  # TODO: real model
         hyps.append(hyp)
 
-    survivors = [h for h in hyps if h.survives()]
-    survivors.sort(key=lambda h: (h.candidate.posterior, -(h.mdl_bits or 0)), reverse=True)
+    def _rank(hs: list[Hypothesis]) -> list[Hypothesis]:
+        return sorted(hs, key=lambda h: (h.candidate.posterior, -(h.mdl_bits or 0)), reverse=True)
 
-    msg = (
-        f"{len(survivors)}/{len(hyps)} hypotheses survived falsification."
-        if survivors
-        else "No hypothesis survived falsification. Report the structural characterization and "
-             "state which anchor (bilingual, numerals, related language) would unlock meaning."
-    )
+    survivors = _rank([h for h in hyps if h.survives()])
+
+    forced: list[Hypothesis] = []
+    if survivors:
+        msg = f"{len(survivors)}/{len(hyps)} hypotheses survived falsification."
+    elif override_feasibility:
+        # nothing survived, but the user asked to force past the verdict: surface the best
+        # internally-scored hypotheses as *forced*, loudly caveated.
+        forced = _rank(hyps)[:top_k]
+        warn(
+            "FEASIBILITY OVERRIDE: 0 hypotheses survived falsification (none beat the null "
+            "models and/or none generalized to held-out text). Returning the top "
+            f"{len(forced)} by internal score in report.forced anyway, at the user's request. "
+            "These are ranked guesses with NO statistical support — do NOT report them as a "
+            "decipherment."
+        )
+        msg = (
+            f"OVERRIDDEN: no hypothesis survived falsification; {len(forced)} forced guesses "
+            "returned in report.forced without epistemic guarantee."
+        )
+    else:
+        msg = (
+            "No hypothesis survived falsification. Report the structural characterization and "
+            "state which anchor (bilingual, numerals, related language) would unlock meaning. "
+            "Pass override_feasibility=True to force the best guesses out anyway."
+        )
+
     return DecipherReport(
         fingerprint=fp,
-        is_language_like=True,
+        is_language_like=lang_ok,
         language_test_detail=detail,
         survivors=survivors,
         all_hypotheses=hyps,
         message=msg,
+        feasibility_overridden=override_feasibility and (not lang_ok or not survivors),
+        forced=forced,
+        warnings=collected_warnings,
     )
