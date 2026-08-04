@@ -33,10 +33,17 @@ class InvariantView:
     yaw_deg: float
     pitch_down_deg: float
     fov_deg: float
+    water: np.ndarray | None = None   # (H, W) bool — rivers anchor city layouts
+
+    @property
+    def water_mask(self) -> np.ndarray:
+        return self.water if self.water is not None else np.zeros_like(self.building)
 
     @property
     def sky(self) -> np.ndarray:
-        return ~np.isfinite(self.depth)
+        # inf = sky. NaN means "depth unknown" (real photos without a depth
+        # model) and is NOT sky — the mask channels still know what it is.
+        return np.isposinf(self.depth)
 
     @classmethod
     def from_pose(
@@ -65,9 +72,11 @@ class InvariantView:
         r = np.clip(((pts[..., 2] - m.n0) / m.res_m).astype(np.int64), 0, m.height - 1)
         build = (np.asarray(store.build_h)[r, c] > 0.5) & hit
         veg = (np.asarray(store.veg_h)[r, c] > 0.5) & hit & ~build
+        water = (np.asarray(store.class_id)[r, c] == 2) & hit & ~build & ~veg
         return cls(depth=depth, building=build, vegetation=veg, points=pts,
                    pos=pos, yaw_deg=float(yaw_deg),
-                   pitch_down_deg=float(pitch_down_deg), fov_deg=float(fov_deg))
+                   pitch_down_deg=float(pitch_down_deg), fov_deg=float(fov_deg),
+                   water=water)
 
 
 N_DEPTH_BINS = 12
@@ -85,8 +94,9 @@ def descriptor(view: InvariantView) -> np.ndarray:
     hist, _ = np.histogram(np.log1p(d), bins=N_DEPTH_BINS, range=(0.0, 8.5))
     parts.append(hist / max(1, finite.sum()))
 
-    # class fractions, split top/bottom half (coarse layout)
-    for mask in (view.building, view.vegetation, view.sky):
+    # class fractions, split top/bottom half (coarse layout). Water matters:
+    # a river's position in frame anchors the whole city layout.
+    for mask in (view.building, view.vegetation, view.sky, view.water_mask):
         top, bot = mask[: h // 2], mask[h // 2:]
         parts.append(np.array([top.mean(), bot.mean()]))
 

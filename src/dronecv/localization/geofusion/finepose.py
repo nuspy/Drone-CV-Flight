@@ -18,20 +18,33 @@ import numpy as np
 from dronecv.localization.geofusion.invariant import InvariantView
 
 
+def _iou(a: np.ndarray, b: np.ndarray) -> float:
+    inter = float((a & b).sum())
+    union = float((a | b).sum())
+    return inter / union if union > 0 else (1.0 if inter == 0 else 0.0)
+
+
 def view_alignment(a: InvariantView, b: InvariantView) -> float:
     """Alignment in [0,1] between two invariant views (same size)."""
-    inter = float((a.building & b.building).sum())
-    union = float((a.building | b.building).sum())
-    iou = inter / union if union > 0 else (1.0 if inter == 0 else 0.0)
+    iou = _iou(a.building, b.building)
+    # a river/lake in frame anchors the layout; only scored when the QUERY
+    # knows about water at all
+    has_water = a.water is not None and a.water_mask.any()
+    water = _iou(a.water_mask, b.water_mask) if has_water else 0.0
 
     both = np.isfinite(a.depth) & np.isfinite(b.depth)
-    if both.any():
-        rel = np.abs(a.depth[both] - b.depth[both]) / np.maximum(a.depth[both], 1.0)
-        depth_ok = float(np.clip(1.0 - np.median(rel) * 2.0, 0.0, 1.0))
-    else:
-        depth_ok = 0.0
     # sky must agree too (a wrong pose often puts buildings where sky was)
     sky_match = float((a.sky == b.sky).mean())
+    if not both.any():
+        # no shared depth (real photo without a depth model): silhouette +
+        # sky (+ water when known), weights redistributed
+        if has_water:
+            return 0.45 * iou + 0.25 * sky_match + 0.30 * water
+        return 0.65 * iou + 0.35 * sky_match
+    rel = np.abs(a.depth[both] - b.depth[both]) / np.maximum(a.depth[both], 1.0)
+    depth_ok = float(np.clip(1.0 - np.median(rel) * 2.0, 0.0, 1.0))
+    if has_water:
+        return 0.4 * iou + 0.25 * depth_ok + 0.15 * sky_match + 0.2 * water
     return 0.5 * iou + 0.3 * depth_ok + 0.2 * sky_match
 
 

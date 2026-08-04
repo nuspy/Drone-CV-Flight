@@ -79,7 +79,7 @@ class GeoRetrievalIndex:
         """Top-k candidate poses by descriptor similarity, optionally only
         within the prior circle (M0 -> M1 support)."""
         q = descriptor(view)
-        sims = self.descs @ q
+        sims = self._similarities(q)
         mask = np.ones(len(sims), bool)
         if prior_xy is not None and prior_radius_m is not None:
             dx = self.positions[:, 0] - prior_xy[0]
@@ -92,6 +92,21 @@ class GeoRetrievalIndex:
         return [Candidate(pos=self.positions[i].copy(), yaw_deg=float(self.yaws[i]),
                           score=float(sims[i])) for i in order if np.isfinite(sims[i])]
 
+    def _similarities(self, q: np.ndarray) -> np.ndarray:
+        """Cosine similarities; when the query has NO depth information (real
+        photos: the depth-histogram dims are all zero) both sides are sliced to
+        the depth-free dims and renormalized, so rankings compare like with
+        like instead of penalizing the missing modality."""
+        from dronecv.localization.geofusion.invariant import N_DEPTH_BINS
+
+        if q[:N_DEPTH_BINS].any():
+            return self.descs @ q
+        qs = q[N_DEPTH_BINS:]
+        qn = float(np.linalg.norm(qs))
+        ds = self.descs[:, N_DEPTH_BINS:]
+        dn = np.linalg.norm(ds, axis=1)
+        return (ds @ (qs / max(qn, 1e-9))) / np.maximum(dn, 1e-9)
+
     def similarity_at(self, q_desc: np.ndarray, xy: np.ndarray, yaw_deg: float) -> float:
         """Descriptor similarity of the index pose nearest to (xy, yaw) — the
         cheap per-particle weight used by M4 (no rendering per particle)."""
@@ -99,4 +114,5 @@ class GeoRetrievalIndex:
         dz = self.positions[:, 2] - xy[1]
         dyaw = np.abs((self.yaws - yaw_deg + 180.0) % 360.0 - 180.0)
         cost = dx * dx + dz * dz + (dyaw * 3.0) ** 2
-        return float(self.descs[int(np.argmin(cost))] @ q_desc)
+        i = int(np.argmin(cost))
+        return float(self._similarities(q_desc)[i]) if len(self.descs) else 0.0

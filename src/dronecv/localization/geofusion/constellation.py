@@ -49,7 +49,9 @@ def extract_buildings(view) -> np.ndarray:
             rows = np.array([p[0] for p in pix])
             cols = np.array([p[1] for p in pix])
             pts = view.points[rows, cols]
-            out.append(np.array([float(np.median(pts[:, 0])), float(np.median(pts[:, 2]))]))
+            e, n = float(np.median(pts[:, 0])), float(np.median(pts[:, 2]))
+            if np.isfinite(e) and np.isfinite(n):  # photos w/o depth: no 3D
+                out.append(np.array([e, n]))
     return np.asarray(out) if out else np.zeros((0, 2))
 
 
