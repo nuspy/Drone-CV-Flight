@@ -23,16 +23,22 @@ from dronecv.localization.geofusion.invariant import InvariantView
 
 
 def _resize_mean(img: np.ndarray, width: int, height: int) -> np.ndarray:
-    """Box-mean resize (no cv2 dependency at this layer)."""
-    h, w = img.shape[:2]
-    rows = (np.arange(height + 1) * h // height).astype(int)
-    cols = (np.arange(width + 1) * w // width).astype(int)
-    out = np.zeros((height, width) + img.shape[2:], np.float32)
-    for r in range(height):
-        for c in range(width):
-            out[r, c] = img[rows[r]:max(rows[r] + 1, rows[r + 1]),
-                            cols[c]:max(cols[c] + 1, cols[c + 1])].mean(axis=(0, 1))
-    return out
+    """Area resize; cv2 when available (fast), numpy box-mean fallback."""
+    try:
+        import cv2
+
+        return cv2.resize(img.astype(np.float32), (width, height),
+                          interpolation=cv2.INTER_AREA)
+    except ImportError:
+        h, w = img.shape[:2]
+        rows = (np.arange(height + 1) * h // height).astype(int)
+        cols = (np.arange(width + 1) * w // width).astype(int)
+        out = np.zeros((height, width) + img.shape[2:], np.float32)
+        for r in range(height):
+            for c in range(width):
+                out[r, c] = img[rows[r]:max(rows[r] + 1, rows[r + 1]),
+                                cols[c]:max(cols[c] + 1, cols[c + 1])].mean(axis=(0, 1))
+        return out
 
 
 def _grad_mag(gray: np.ndarray) -> np.ndarray:
@@ -59,28 +65,41 @@ def _flood_from_top(cand: np.ndarray) -> np.ndarray:
     return out
 
 
-def segment_photo(rgb: np.ndarray, width: int = 64, height: int = 48) -> dict:
-    """Heuristic sky/vegetation/water/building masks at working resolution."""
-    img = _resize_mean(rgb.astype(np.float32) / 255.0, width, height)
+def segment_photo(rgb: np.ndarray, width: int = 64, height: int = 48,
+                  work_scale: int = 4) -> dict:
+    """Heuristic sky/vegetation/water/building masks.
+
+    Segmentation runs at `work_scale` times the output resolution so thin
+    structures (spires, bridges, tree lines) survive the thresholds, then the
+    masks are area-downsampled and re-composed by priority (sky > vegetation >
+    water > building) so they stay disjoint."""
+    wf, hf = width * work_scale, height * work_scale
+    img = _resize_mean(rgb.astype(np.float32) / 255.0, wf, hf)
     r, g, b = img[..., 0], img[..., 1], img[..., 2]
     v = img.max(axis=-1)
     grad = _grad_mag(0.299 * r + 0.587 * g + 0.114 * b)
 
     # sky: smooth+bright regions connected to the top edge (handles blue,
     # overcast and sunset skies alike)
-    sky_cand = (grad < 0.10) & ((v > 0.45) | ((b > r) & (b > g) & (v > 0.3)))
-    sky = _flood_from_top(sky_cand)
+    sky_cand = (grad < 0.08) & ((v > 0.45) | ((b > r) & (b > g) & (v > 0.3)))
+    sky_f = _flood_from_top(sky_cand)
 
-    veg = (~sky) & (g > r * 1.04) & (g > b * 1.04) & (g > 0.12)
+    veg_f = (~sky_f) & (g > r * 1.04) & (g > b * 1.04) & (g > 0.12)
 
-    # water: bluish/grey, smooth, below the horizon
-    horizon = _horizon_row(sky)
-    rows = np.arange(height)[:, None].repeat(width, 1)
-    water = (~sky) & (~veg) & (b >= r * 0.95) & (grad < 0.08) & (rows > horizon)
+    horizon_f = _horizon_row(sky_f)
+    rows = np.arange(hf)[:, None].repeat(wf, 1)
+    water_f = (~sky_f) & (~veg_f) & (b >= r * 0.95) & (grad < 0.06) & (rows > horizon_f)
 
+    def down(mask: np.ndarray) -> np.ndarray:
+        return _resize_mean(mask.astype(np.float32), width, height)
+
+    sky_s, veg_s, water_s = down(sky_f), down(veg_f), down(water_f)
+    sky = sky_s > 0.5
+    veg = (~sky) & (veg_s > 0.35)
+    water = (~sky) & (~veg) & (water_s > 0.35)
     building = ~(sky | veg | water)
     return {"sky": sky, "vegetation": veg, "water": water, "building": building,
-            "horizon_row": horizon}
+            "horizon_row": int(round(horizon_f / work_scale))}
 
 
 def _horizon_row(sky: np.ndarray) -> int:
