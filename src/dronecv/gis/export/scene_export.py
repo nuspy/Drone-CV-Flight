@@ -87,6 +87,11 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
 
     objects: dict[str, m.Mesh] = {}
     n_buildings = 0
+    # Real per-building colors (Overture roof_color/facade_color) become
+    # per-vertex tints; None = "use the class/palette color" (filled at GLB
+    # time). Keyed like `objects` (walls_<cls> / roof_<cls>).
+    roof_tint: dict[str, list] = {}
+    wall_tint: dict[str, list] = {}
     vec_path = Path(gis_dir) / "buildings.json"
     if vec_path.exists():
         walls_of: dict[str, m.Mesh] = {}
@@ -111,6 +116,10 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
             cls = b.get("class", "generic")
             walls_of.setdefault(cls, m.Mesh()).add(walls.vertices, walls.faces, walls.uvs)
             roofs_of.setdefault(cls, m.Mesh()).add(roof.vertices, roof.faces, roof.uvs)
+            rc = b.get("roof_color")
+            fc = b.get("facade_color")
+            roof_tint.setdefault(cls, []).extend([tuple(rc) if rc else None] * len(roof.vertices))
+            wall_tint.setdefault(cls, []).extend([tuple(fc) if fc else None] * len(walls.vertices))
             n_buildings += 1
         for cls, mesh in walls_of.items():
             objects[f"walls_{cls}"] = mesh
@@ -182,13 +191,28 @@ def export_scene(gis_dir: Path, out_dir: Path, terrain_resolution: int = 513) ->
         if not mesh.vertices:
             continue
         cls = name.split("_", 1)[-1]
-        if name.startswith("walls"):
-            mat = mat_wall
+        is_wall = name.startswith("walls")
+        tint = (wall_tint if is_wall else roof_tint).get(cls)
+        colors = None
+        if tint and any(t is not None for t in tint) and len(tint) == len(mesh.vertices):
+            # per-building real colors: bake as COLOR_0 (glTF multiplies it
+            # into the material), filling untinted buildings with neutral /
+            # class color so they keep today's look
+            if is_wall:
+                colors = np.array([t if t is not None else (1.0, 1.0, 1.0)
+                                   for t in tint], np.float32)
+                mat = mat_wall
+            else:
+                base_c = roof_color_of.get(cls, palette.roof[0])
+                colors = np.array([t if t is not None else base_c
+                                   for t in tint], np.float32)
+                mat = glb.add_material(name, (1.0, 1.0, 1.0))
         else:
-            mat = glb.add_material(name, roof_color_of.get(cls, palette.roof[0]))
+            mat = mat_wall if is_wall else glb.add_material(
+                name, roof_color_of.get(cls, palette.roof[0]))
         uv = np.asarray(mesh.uvs, np.float32) if mesh.uvs else None
         glb.add_mesh(name, np.asarray(mesh.vertices, np.float32),
-                     np.asarray(mesh.faces, np.uint32), mat, uvs=uv)
+                     np.asarray(mesh.faces, np.uint32), mat, uvs=uv, colors=colors)
     glb.save(out_dir / "scene.glb")
 
     # ---- centerlines for splines (roads/rivers/rail) ----

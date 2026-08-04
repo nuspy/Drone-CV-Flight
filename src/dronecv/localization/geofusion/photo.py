@@ -122,18 +122,33 @@ def estimate_pitch_down_deg(horizon_row: int, height: int, fov_deg: float,
 
 def view_from_photo(rgb: np.ndarray, width: int = 64, height: int = 48,
                     fov_deg: float = 65.0,
-                    pitch_down_deg: float | None = None) -> InvariantView:
-    """Photo -> InvariantView with unknown depth (NaN; inf only on sky)."""
+                    pitch_down_deg: float | None = None,
+                    depth_fn="auto") -> InvariantView:
+    """Photo -> InvariantView. Depth: RELATIVE from the monocular plug-in
+    when one is available (`depth_fn="auto"`), else unknown (NaN; inf on
+    sky). Pass `depth_fn=None` to force mask-only."""
     seg = segment_photo(rgb, width, height)
     if pitch_down_deg is None:
         pitch_down_deg = float(np.clip(
             estimate_pitch_down_deg(seg["horizon_row"], height, fov_deg, width),
             2.0, 60.0))
-    depth = np.full((height, width), np.nan, np.float32)
-    depth[seg["sky"]] = np.inf
+
+    if depth_fn == "auto":
+        from dronecv.localization.geofusion.depth_plugin import get_depth_fn
+
+        depth_fn = get_depth_fn()
+    relative = False
+    if depth_fn is not None:
+        d = _resize_mean(np.asarray(depth_fn(rgb), np.float32), width, height)
+        depth = d.astype(np.float32)
+        depth[seg["sky"]] = np.inf
+        relative = True
+    else:
+        depth = np.full((height, width), np.nan, np.float32)
+        depth[seg["sky"]] = np.inf
     return InvariantView(depth=depth, building=seg["building"],
                          vegetation=seg["vegetation"],
                          points=np.full((height, width, 3), np.nan),
                          pos=np.zeros(3), yaw_deg=0.0,
                          pitch_down_deg=pitch_down_deg, fov_deg=fov_deg,
-                         water=seg["water"])
+                         water=seg["water"], depth_relative=relative)

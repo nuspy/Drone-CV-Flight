@@ -220,6 +220,17 @@ class _RegionScanMixin:
         return bucket_by_cell(self._kind, self.fetch(cells_bbox(cells)), cells)
 
 
+def _parse_hex_color(raw) -> tuple[float, float, float] | None:
+    """'#rrggbb' (Overture roof/facade colors) -> RGB floats, else None."""
+    s = str(raw or "").strip().lstrip("#")
+    if len(s) != 6:
+        return None
+    try:
+        return tuple(int(s[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
 class OvertureBuildingsProvider(_RegionScanMixin):
     """`.fetch(bbox) -> list[Building]` — drop-in for OverpassBuildings."""
 
@@ -241,20 +252,26 @@ class OvertureBuildingsProvider(_RegionScanMixin):
             log.info(f"reading {len(rgs)} row groups from {key.rsplit('/', 1)[-1]}")
             cols = ["geometry", "height", "num_floors", "subtype", "class"]
             try:
-                table = index.read_rows(url, rgs, cols + ["roof_shape", "roof_height"], bbox)
+                table = index.read_rows(
+                    url, rgs, cols + ["roof_shape", "roof_height",
+                                      "roof_color", "facade_color"], bbox)
                 roof_shapes = table.column("roof_shape").to_pylist()
                 roof_heights = table.column("roof_height").to_pylist()
+                roof_colors = table.column("roof_color").to_pylist()
+                facade_colors = table.column("facade_color").to_pylist()
             except Exception:  # noqa: BLE001 — schema without roof columns
                 table = index.read_rows(url, rgs, cols, bbox)
                 roof_shapes = [None] * table.num_rows
                 roof_heights = [None] * table.num_rows
+                roof_colors = [None] * table.num_rows
+                facade_colors = [None] * table.num_rows
             heights = table.column("height").to_pylist()
             floors = table.column("num_floors").to_pylist()
             subtypes = table.column("subtype").to_pylist()
             classes = table.column("class").to_pylist()
-            for wkb_val, h, fl, st, cl, rs, rh in zip(
+            for wkb_val, h, fl, st, cl, rs, rh, rc, fc in zip(
                 table.column("geometry").to_pylist(), heights, floors, subtypes, classes,
-                roof_shapes, roof_heights, strict=True,
+                roof_shapes, roof_heights, roof_colors, facade_colors, strict=True,
             ):
                 for poly in _wkb_rings(wkb_val):
                     height, source = None, "none"
@@ -275,6 +292,8 @@ class OvertureBuildingsProvider(_RegionScanMixin):
                         building_class=cls,
                         roof_shape=str(rs) if rs else None,
                         roof_height_m=float(rh) if rh else None,
+                        roof_color=_parse_hex_color(rc),
+                        facade_color=_parse_hex_color(fc),
                     ))
         with_h = sum(1 for b in buildings if b.height_m is not None)
         log.info(f"overture buildings: {len(buildings)} in bbox ({with_h} with heights)")
@@ -372,10 +391,45 @@ ARCHETYPE_OF_CATEGORY = [
 ]
 
 
+def fetch_building_parts(release: str, bbox: BBox) -> list:
+    """Overture `buildings/building_part`: the REAL 3D detail of landmarks —
+    domes, towers, spires and wings mapped as separate volumes with their own
+    heights (the Parliament dome is a 96 m part while the body is ~25 m).
+    Returns BuildingPart records the existing `stamp_building_parts` raster
+    pass consumes unchanged."""
+    from dronecv.gis.providers.poi import BuildingPart
+
+    index = _FooterIndex()
+    parts: list = []
+    for key, rgs in scan_files_parallel(
+        index, list_theme_files(release, "buildings", "building_part"), bbox
+    ):
+        url = f"{BUCKET}/{key}"
+        table = index.read_rows(url, rgs, ["geometry", "height", "min_height",
+                                           "num_floors"], bbox)
+        for wkb_val, h, mh, fl in zip(
+            table.column("geometry").to_pylist(), table.column("height").to_pylist(),
+            table.column("min_height").to_pylist(), table.column("num_floors").to_pylist(),
+            strict=True,
+        ):
+            height = float(h) if h else (float(fl) * 3.0 if fl else None)
+            if height is None:
+                continue
+            for poly in _wkb_rings(wkb_val):
+                parts.append(BuildingPart(
+                    footprint_lonlat=list(poly.exterior.coords),
+                    height_m=height,
+                    min_height_m=float(mh) if mh else 0.0,
+                ))
+    log.info(f"overture building parts: {len(parts)} in bbox")
+    return parts
+
+
 class OverturePoiProvider(_RegionScanMixin):
-    """POIs from the Overture `places` theme -> (Poi, []) — same contract as
-    OverpassPoi, so archetype stamping, building matching and Wikimedia photo
-    fetch work unchanged. Overture has no building:part geometries."""
+    """POIs from the Overture `places` theme + `building_part` volumes ->
+    (Poi, BuildingPart) — same contract as OverpassPoi, so archetype
+    stamping, building matching, part stamping and Wikimedia photo fetch all
+    work unchanged."""
 
     _kind = "poi"
 
@@ -418,4 +472,9 @@ class OverturePoiProvider(_RegionScanMixin):
                     tags={"overture_category": cat_primary},
                 ))
         log.info(f"overture places: {len(pois)} landmark POIs in bbox")
-        return pois, []
+        try:
+            parts = fetch_building_parts(release, bbox)
+        except Exception as e:  # noqa: BLE001 — parts are enrichment, not vital
+            log.warning(f"building parts unavailable ({e}); continuing without")
+            parts = []
+        return pois, parts

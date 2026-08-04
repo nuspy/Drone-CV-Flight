@@ -264,26 +264,31 @@ def build_environment(
     # Persist the VECTOR footprints (heights now resolved): LoD2 scene export
     # builds real prisms + shaped roofs from these instead of re-vectorizing
     # the raster (which loses footprints and roof metadata).
-    from dronecv.gis.geometry import ring_to_enu
-
-    vec = []
-    for b in buildings:
-        ring = ring_to_enu(anchor, b.footprint_lonlat)
-        if len(ring) < 4:
-            continue
-        vec.append({
-            "ring_enu": [[round(e, 2), round(n, 2)] for e, n in ring],
-            "holes_enu": [[[round(e, 2), round(n, 2)] for e, n in ring_to_enu(anchor, h)]
-                          for h in b.holes_lonlat],
-            "height_m": b.height_m,
-            "class": b.building_class,
-            "height_source": b.height_source,
-            "roof_shape": b.roof_shape,
-            "roof_height_m": b.roof_height_m,
-        })
     import json as _json
 
-    (gis_dir / "buildings.json").write_text(_json.dumps({"buildings": vec}))
+    from dronecv.gis.geometry import ring_to_enu
+
+    def _persist_buildings() -> None:
+        vec = []
+        for b in buildings:
+            ring = ring_to_enu(anchor, b.footprint_lonlat)
+            if len(ring) < 4:
+                continue
+            vec.append({
+                "ring_enu": [[round(e, 2), round(n, 2)] for e, n in ring],
+                "holes_enu": [[[round(e, 2), round(n, 2)] for e, n in ring_to_enu(anchor, h)]
+                              for h in b.holes_lonlat],
+                "height_m": b.height_m,
+                "class": b.building_class,
+                "height_source": b.height_source,
+                "roof_shape": b.roof_shape,
+                "roof_height_m": b.roof_height_m,
+                "roof_color": b.roof_color,
+                "facade_color": b.facade_color,
+            })
+        (gis_dir / "buildings.json").write_text(_json.dumps({"buildings": vec}))
+
+    _persist_buildings()
 
     # ---- POIs: landmark archetypes, building:part LoD, Commons photos ----
     pois, parts, poi_stats = [], [], {}
@@ -297,8 +302,18 @@ def build_environment(
         pois, parts = _celled("poi", sources.poi)
         n_parts = stamp_building_parts(store, anchor, parts)
         pairs = match_pois_to_buildings(anchor, pois, buildings)
+        # Real landmark heights from Wikidata (best-effort; offline = skip).
+        # Runs BEFORE archetype stamping so spires/domes scale off the truth.
+        from dronecv.gis.providers.wikidata_heights import enrich_landmark_heights
+
+        n_wikidata = enrich_landmark_heights(pois, pairs)
+        if n_wikidata:
+            b_stats = rasterize_buildings(store, anchor, buildings)  # re-stamp
+            _persist_buildings()  # exports must see the enriched heights too
+        poi_extra = {"n_wikidata_heights": n_wikidata}
         n_arch = stamp_archetypes(store, anchor, pairs)
-        poi_stats = {"n_pois": len(pois), "n_building_parts": n_parts, "n_archetypes": n_arch}
+        poi_stats = {"n_pois": len(pois), "n_building_parts": n_parts,
+                     "n_archetypes": n_arch, **poi_extra}
         if fetch_photos:
             from dronecv.gis.providers.poi import fetch_commons_photos
 

@@ -34,6 +34,10 @@ class InvariantView:
     pitch_down_deg: float
     fov_deg: float
     water: np.ndarray | None = None   # (H, W) bool — rivers anchor city layouts
+    # True when `depth` is RELATIVE (monocular model, unknown scale): the
+    # alignment normalizes both sides by their median so the scale cancels;
+    # retrieval keeps the depth bins empty.
+    depth_relative: bool = False
 
     @property
     def water_mask(self) -> np.ndarray:
@@ -89,10 +93,15 @@ def descriptor(view: InvariantView) -> np.ndarray:
     finite = np.isfinite(view.depth)
     parts: list[np.ndarray] = []
 
-    # log-depth histogram (shape of the visible ranges; scale-compressed)
-    d = view.depth[finite]
-    hist, _ = np.histogram(np.log1p(d), bins=N_DEPTH_BINS, range=(0.0, 8.5))
-    parts.append(hist / max(1, finite.sum()))
+    # log-depth histogram (shape of the visible ranges; scale-compressed).
+    # RELATIVE depth would not be comparable with the metric index: keep the
+    # bins empty and let the depth-free similarity path handle it.
+    if view.depth_relative:
+        parts.append(np.zeros(N_DEPTH_BINS))
+    else:
+        d = view.depth[finite]
+        hist, _ = np.histogram(np.log1p(d), bins=N_DEPTH_BINS, range=(0.0, 8.5))
+        parts.append(hist / max(1, finite.sum()))
 
     # class fractions, split top/bottom half (coarse layout). Water matters:
     # a river's position in frame anchors the whole city layout.

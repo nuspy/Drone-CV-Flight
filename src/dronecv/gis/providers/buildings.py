@@ -58,6 +58,11 @@ class Building:
     osm_id: int | None = None
     roof_shape: str | None = None  # flat | gabled | hipped | pyramidal | skillion | dome
     roof_height_m: float | None = None
+    # Real per-building colors where the source maps them (Overture
+    # roof_color/facade_color) — the exports tint the meshes per building
+    # instead of only per class. RGB floats in [0, 1].
+    roof_color: tuple[float, float, float] | None = None
+    facade_color: tuple[float, float, float] | None = None
 
 
 def _parse_height(tags: dict) -> tuple[float | None, str]:

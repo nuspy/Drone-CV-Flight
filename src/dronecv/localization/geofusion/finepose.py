@@ -41,7 +41,15 @@ def view_alignment(a: InvariantView, b: InvariantView) -> float:
         if has_water:
             return 0.45 * iou + 0.25 * sky_match + 0.30 * water
         return 0.65 * iou + 0.35 * sky_match
-    rel = np.abs(a.depth[both] - b.depth[both]) / np.maximum(a.depth[both], 1.0)
+    da, db = a.depth[both], b.depth[both]
+    if a.depth_relative or b.depth_relative:
+        # monocular relative depth: median-normalize both sides so the
+        # unknown scale cancels and only the depth STRUCTURE is compared
+        da = da / max(float(np.median(da)), 1e-6)
+        db = db / max(float(np.median(db)), 1e-6)
+        rel = np.abs(da - db) / np.maximum(da, 1e-3)
+    else:
+        rel = np.abs(da - db) / np.maximum(da, 1.0)
     depth_ok = float(np.clip(1.0 - np.median(rel) * 2.0, 0.0, 1.0))
     if has_water:
         return 0.4 * iou + 0.25 * depth_ok + 0.15 * sky_match + 0.2 * water
